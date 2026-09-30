@@ -1,0 +1,11 @@
+# WalkPad bridge config. Non-secret settings only (secrets go in .env).
+
+[safety]
+# Hard speed cap. The device's own max still applies if it is lower.
+max_speed_kmh = 6.0
+# Max speed change rate. Changes are sent in steps of max_ramp_kmh_per_s * ramp_tick_s.
+max_ramp_kmh_per_s = 0.5
+ramp_tick_s = 1.0
+# If the pad connection drops, reconnect (up to this many tries) and stop the belt.
+reconnect_attempts = 3
+reconnect_backoff_s = 1.0

@@ -4,10 +4,12 @@ version = "0.1.0"
 description = "BLE bridge for a KingSmith WalkingPad: live data, safe belt control, session storage."
 readme = "README.md"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "typer>=0.27.2",
+]
 
 [project.scripts]
-walkpad-bridge = "walkpad_bridge:main"
+walkpad-bridge = "walkpad_bridge.cli:app"
 
 [build-system]
 requires = ["uv_build>=0.12.21,<0.13.0"]
@@ -16,7 +18,10 @@ build-backend = "uv_build"
 [dependency-groups]
 dev = [
     "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
 ]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"

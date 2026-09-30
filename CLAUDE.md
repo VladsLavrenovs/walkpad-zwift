@@ -8,8 +8,10 @@ Owner: Vlads. Not a commercial product. Keep it simple, well-tested, and safe.
 - Reads live data from the walking pad over Bluetooth Low Energy (speed, distance, steps, time).
 - Controls the belt (start / stop / set speed) with strict safety limits.
 - Stores every session and shows statistics and history.
-- Renders a smooth "walk across the world" view: a 2-frame PNG walker sprite fixed on screen,
+- Renders a smooth "walk across the world" view: a 4-frame PNG walker sprite (back view) fixed on screen,
   the world (Google Photorealistic 3D Tiles via CesiumJS) moving around it along a real route.
+- Worlds are pluggable: placeholder, YouTube walking videos synced to belt speed, Google 3D tiles,
+  and a procedurally generated fantasy world. HUD, stats and controls are shared by all worlds.
 - Later: optional Windows receiver that turns walking into virtual Xbox controller input for other games.
 
 ## Architecture
@@ -68,5 +70,9 @@ Cloudflare Access allowing only the owner's email.
 
 ## Hardware
 - The owner's pad speaks KingSmith's proprietary BLE protocol only (service 0xFE00, no FTMS),
-  firmware `M30_V187.2.0`; live data verified on 2026-09-30 (see `bridge/README.md`). The exact
-  model name is still unconfirmed. The bridge auto-detects KingSmith vs FTMS (0x1826) anyway.
+  firmware `M30_V187.2.0`; live data and belt control verified on 2026-09-30 (see
+  `bridge/README.md`). The exact model name is still unconfirmed. The bridge auto-detects
+  KingSmith vs FTMS (0x1826) anyway.
+- Start: the pad counts down (belt states 9, 8, 7) and then runs up to its own start speed
+  (2.5 km/h) unless the bridge pins the speed right after it starts moving.
+- The belt keeps running when the BLE link drops.

@@ -65,6 +65,8 @@ On Windows (dev only) the signals are Ctrl+C and Ctrl+Break; SIGTERM there is an
 - Speed responses must include the **actually applied target** (the value `set_speed()` returns
   after clamping), not just echo the request.
 - Push `SafetyEvent`s to clients over the WebSocket.
+- `SpeedController` should subscribe to the backend's sample stream itself instead of relying
+  on callers to call `observe()` (today a caller that forgets means above-cap goes unreported).
 
 ## Config
 

@@ -115,8 +115,15 @@ export class App {
     this.worldId = info.id
     const world = info.create()
     this.world = world
-    await world.init(this.worldEl)
     this.walker.visible = world.showsWalker
+    await world.init(this.worldEl, {
+      bridge: this.bridge,
+      canEdit: () => this.controlAllowed && !this.config.obs,
+      setWalkerVisible: (on) => {
+        if (this.world === world) this.walker.visible = on
+      },
+      obs: this.config.obs,
+    })
     if (!this.config.obs) {
       try {
         safeStorage()?.setItem(WORLD_KEY, info.id)

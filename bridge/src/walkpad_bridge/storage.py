@@ -1,4 +1,5 @@
-"""SQLite storage: walking sessions and their per-second samples (stdlib sqlite3).
+"""SQLite storage: walking sessions and their per-second samples, and the video library
+(stdlib sqlite3).
 
 Session totals are updated with every stored sample, so a crash or power cut leaves a session
 with correct totals; it is closed (ended_at = its last sample) on the next start.
@@ -36,8 +37,23 @@ CREATE TABLE IF NOT EXISTS samples (
     belt       TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS samples_session_t ON samples (session_id, t);
+
+-- v2: walking-tour videos for the YouTube world. Scenery only; sessions do not refer to them.
+CREATE TABLE IF NOT EXISTS videos (
+    id             INTEGER PRIMARY KEY,
+    video_id       TEXT NOT NULL UNIQUE,   -- YouTube id (11 chars)
+    url            TEXT NOT NULL,          -- as pasted
+    title          TEXT NOT NULL DEFAULT '',
+    pace_kmh       REAL NOT NULL DEFAULT 4.5, -- walking pace of whoever filmed it
+    position_s     REAL NOT NULL DEFAULT 0,   -- where playback last stopped
+    created_at     REAL NOT NULL,
+    last_played_at REAL
+);
 """
-SCHEMA_VERSION = 1
+# v1 -> v2 only adds a table, which CREATE ... IF NOT EXISTS does on open.
+SCHEMA_VERSION = 2
+DEFAULT_PACE_KMH = 4.5
+VIDEO_FIELDS = ("title", "pace_kmh", "position_s")
 
 
 @dataclass(frozen=True, slots=True)
@@ -149,6 +165,48 @@ class Store:
             )
             session["samples"] = [dict(s) for s in samples]
         return session
+
+    # --- video library ----------------------------------------------------------------------
+
+    def add_video(
+        self, video_id: str, url: str, title: str, pace_kmh: float, position_s: float, now: float
+    ) -> tuple[dict[str, Any], bool]:
+        """Add a video; if it is already in the library, return that one. (video, created)"""
+        existing = self.db.execute("SELECT * FROM videos WHERE video_id = ?", (video_id,)).fetchone()
+        if existing is not None:
+            return dict(existing), False
+        cur = self.db.execute(
+            "INSERT INTO videos (video_id, url, title, pace_kmh, position_s, created_at)"
+            " VALUES (?, ?, ?, ?, ?, ?)",
+            (video_id, url, title, pace_kmh, position_s, now),
+        )
+        assert cur.lastrowid is not None
+        video = self.get_video(cur.lastrowid)
+        assert video is not None
+        return video, True
+
+    def list_videos(self) -> list[dict[str, Any]]:
+        rows = self.db.execute(
+            "SELECT * FROM videos ORDER BY last_played_at IS NULL, last_played_at DESC, created_at DESC"
+        )
+        return [dict(r) for r in rows]
+
+    def get_video(self, id: int) -> dict[str, Any] | None:
+        row = self.db.execute("SELECT * FROM videos WHERE id = ?", (id,)).fetchone()
+        return None if row is None else dict(row)
+
+    def update_video(self, id: int, fields: dict[str, Any], now: float) -> dict[str, Any] | None:
+        """Update title / pace_kmh / position_s. A new position also marks it last played."""
+        changes = {k: v for k, v in fields.items() if k in VIDEO_FIELDS and v is not None}
+        if "position_s" in changes:
+            changes["last_played_at"] = now
+        if changes:
+            assignments = ", ".join(f"{k} = ?" for k in changes)
+            self.db.execute(f"UPDATE videos SET {assignments} WHERE id = ?", (*changes.values(), id))
+        return self.get_video(id)
+
+    def delete_video(self, id: int) -> bool:
+        return self.db.execute("DELETE FROM videos WHERE id = ?", (id,)).rowcount > 0
 
     def finished_sessions(self) -> list[dict[str, Any]]:
         rows = self.db.execute("SELECT * FROM sessions WHERE ended_at IS NOT NULL ORDER BY started_at")

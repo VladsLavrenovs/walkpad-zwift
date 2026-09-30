@@ -86,6 +86,17 @@ export interface Stats {
   all_time: PeriodTotals
 }
 
+export interface Video {
+  id: number
+  video_id: string
+  url: string
+  title: string
+  pace_kmh: number
+  position_s: number
+  created_at: number
+  last_played_at: number | null
+}
+
 export class ControlError extends Error {
   readonly status: number
 
@@ -211,6 +222,44 @@ export class BridgeClient {
       throw new ControlError(detail, res.status)
     }
     return data
+  }
+
+  // --- video library (writes are local-only on the bridge, like control) -------------------
+
+  async videos(): Promise<Video[]> {
+    return (await this.get<{ videos: Video[] }>('/videos')).videos
+  }
+
+  private async write<T>(method: string, path: string, body?: unknown, keepalive = false): Promise<T> {
+    if (!this.client) throw new ControlError('view only', 403)
+    const res = await fetch(this.url(path), {
+      method,
+      keepalive, // lets a last position update finish while the page unloads
+      headers: { 'Content-Type': 'application/json', 'X-Client-Id': this.client },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    })
+    if (res.status === 405 || (res.status === 404 && method === 'POST')) {
+      // The endpoint does not exist: this page is newer than the running bridge.
+      throw new ControlError('The bridge is older than this page. Restart it: ./scripts/update.sh --restart', res.status)
+    }
+    if (!res.ok) {
+      const data = (await res.json().catch(() => ({}))) as { detail?: unknown }
+      const detail = typeof data.detail === 'string' ? data.detail : Array.isArray(data.detail) ? 'invalid input' : `HTTP ${res.status}`
+      throw new ControlError(detail, res.status)
+    }
+    return (res.status === 204 ? undefined : await res.json()) as T
+  }
+
+  addVideo(url: string, paceKmh?: number): Promise<Video> {
+    return this.write('POST', '/videos', paceKmh === undefined ? { url } : { url, pace_kmh: paceKmh })
+  }
+
+  updateVideo(id: number, fields: Partial<Pick<Video, 'title' | 'pace_kmh' | 'position_s'>>, keepalive = false): Promise<Video> {
+    return this.write('PATCH', `/videos/${id}`, fields, keepalive)
+  }
+
+  deleteVideo(id: number): Promise<void> {
+    return this.write('DELETE', `/videos/${id}`)
   }
 
   start(kmh: number): Promise<StatusMsg> {

@@ -58,6 +58,45 @@ button:disabled { cursor: not-allowed; opacity: 0.45; }
 .walker img.on { opacity: 1; transition: opacity var(--fade, 80ms) linear; }
 .walker img.under { opacity: 1; }
 
+/* --- YouTube world ------------------------------------------------------------------------ */
+.yt-world { position: absolute; inset: 0; background: #000; overflow: hidden; }
+.yt-stage { position: absolute; inset: 0; pointer-events: none; }
+/* Cover the screen like object-fit: cover (16:9, centred, cropped), first person. */
+.yt-stage iframe, .yt-stage .yt-player {
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+  width: max(100vw, 177.78vh); height: max(100vh, 56.25vw); border: 0;
+}
+.yt-paused {
+  position: absolute; inset: 0; display: none; align-items: center; justify-content: center;
+  background: rgb(8 10 14 / 0.82); color: var(--ink-2); font-size: 18px; letter-spacing: 0.02em; pointer-events: none;
+}
+.yt-world.paused .yt-paused { display: flex; }
+.yt-note {
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); max-width: min(90vw, 520px);
+  padding: 14px 18px; border-radius: 12px; background: var(--panel); border: 1px solid var(--line); text-align: center;
+}
+.yt-toolbar {
+  position: absolute; top: 52px; left: 14px; display: flex; align-items: center; gap: 8px; font-size: 14px;
+}
+.yt-toolbar > * { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 4px 10px; color: var(--ink); }
+.yt-rate { font-variant-numeric: tabular-nums; min-width: 64px; text-align: center; }
+.yt-walker { display: inline-flex; align-items: center; gap: 4px; color: var(--ink-2); }
+.yt-panel {
+  position: absolute; top: 92px; left: 14px; width: min(420px, calc(100vw - 28px)); max-height: 55vh; overflow: auto;
+  padding: 12px; background: rgb(15 20 25 / 0.9); border: 1px solid var(--line); border-radius: 12px;
+}
+.yt-add { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.yt-add input[name='url'] { flex: 1 1 100%; }
+.yt-panel input { background: #ffffff10; color: var(--ink); border: 1px solid var(--line); border-radius: 6px; padding: 5px 7px; font: inherit; }
+.yt-panel input[type='number'] { width: 64px; }
+.yt-panel button { background: #ffffff14; color: var(--ink); border: 1px solid var(--line); border-radius: 6px; padding: 5px 10px; }
+.yt-hint { margin: 6px 0 8px; font-size: 12px; color: var(--ink-3); }
+.yt-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.yt-list li { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--ink-2); }
+.yt-list li.current .yt-pick { border-color: var(--accent); color: var(--accent); }
+.yt-pick { flex: 1; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.yt-del { padding: 5px 8px !important; }
+
 /* --- HUD --------------------------------------------------------------------------------- */
 .hud {
   position: absolute; top: 56px; left: 50%; transform: translateX(-50%);
@@ -89,7 +128,10 @@ button:disabled { cursor: not-allowed; opacity: 0.45; }
 .pill[data-kind='bad']::before { color: var(--bad); }
 .pill[data-kind='wait']::before { color: var(--ink-3); }
 .badge { padding: 3px 8px; border-radius: 6px; font-size: 12px; background: var(--panel); color: var(--ink-2); border: 1px dashed var(--line); }
-.world-menu { color: var(--ink-2); }
+.world-menu, .topbar > .link {
+  color: var(--ink-2); background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 3px 8px;
+}
+.topbar > .link { color: var(--accent); }
 .world-menu select { margin-left: 4px; background: var(--panel); color: var(--ink); border: 1px solid var(--line); border-radius: 6px; padding: 3px 6px; }
 
 .banner {
@@ -127,6 +169,7 @@ button:disabled { cursor: not-allowed; opacity: 0.45; }
 
 /* --- stats page -------------------------------------------------------------------------- */
 .on-stats > .world, .on-stats > .walker, .on-stats > .hud, .on-stats > .topbar { visibility: hidden; }
+.on-stats .yt-toolbar, .on-stats .yt-panel { display: none; }
 .stats-page {
   position: absolute; inset: 0; overflow: auto; padding: 20px max(16px, calc(50vw - 460px)) 180px;
   background: var(--surface-1); color: var(--surface-ink); color-scheme: light dark;

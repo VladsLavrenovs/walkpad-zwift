@@ -102,6 +102,10 @@ real pad. Stopping the service (Ctrl+C, SIGTERM) stops the belt and closes the o
 | `POST /control/start {"kmh": 1.5}` | localhost/LAN | start, then (once moving) ramp to kmh |
 | `POST /control/speed {"kmh": 2.0}` | localhost/LAN | ramp to kmh |
 | `POST /control/stop` | localhost/LAN | stop now |
+| `GET /videos` | anyone | video library for the YouTube world, last played first |
+| `POST /videos {"url": "...", "pace_kmh": 4.5}` | localhost/LAN | add a YouTube link (201; 200 if already there; 422 not a YouTube link) |
+| `PATCH /videos/{id} {"title"?, "pace_kmh"?, "position_s"?}` | localhost/LAN | edit; a new position also marks it last played |
+| `DELETE /videos/{id}` | localhost/LAN | remove |
 
 Control responses are the new status plus `applied_target_kmh`: the target **after** the cap, not
 the request echoed. Errors: 403 not allowed from here, 409 not possible now (no WebSocket for this
@@ -126,7 +130,8 @@ reports it stopped or the pad connection drops. A connection that comes back wit
 the pad's counters still running resumes the same session instead of starting a second one. Totals come from the pad's counters, carried
 across the resets the pad does while slowing down. At most one sample per second is stored.
 Sessions under `min_session_s` (10 s) are dropped. A crash leaves correct totals; the session is
-closed on the next start. Database: `bridge/data/walkpad.sqlite`.
+closed on the next start. Database: `bridge/data/walkpad.sqlite` (schema v2: v1 databases gain
+the `videos` table on the next start; sessions are untouched).
 
 **Stats**: local time of the laptop. A streak day needs 60 s of walking; the current streak
 still counts until today is over. Fastest average speed only counts sessions of 5+ minutes.
@@ -174,6 +179,7 @@ On Windows (dev only) the signals are Ctrl+C and Ctrl+Break; SIGTERM there is an
 | `access.py` | Who may control: localhost/LAN, tunnel detection, Host check. |
 | `server.py` | FastAPI app: endpoints above, CORS, the web app. |
 | `udp.py` | `UdpSender`: JSON datagrams. |
+| `youtube.py` | YouTube link parsing (id and `t=` start) for the video library. |
 | `lag.py` | `LagMeter`: command-to-effect lag from SpeedController command events and samples. |
 | `safety.py` | `SpeedController`: the **only** code allowed to call `backend.set_speed` (a test enforces this). |
 | `clock.py` | Injectable clock, so tests run ramps on virtual time. |

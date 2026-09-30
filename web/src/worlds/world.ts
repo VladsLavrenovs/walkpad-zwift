@@ -3,11 +3,24 @@
  * everything else (HUD, walker, controls, stats), which stays the same for every world.
  */
 
+import type { BridgeClient } from '../bridge'
+
+/** What the app offers a world. */
+export interface WorldContext {
+  bridge: BridgeClient
+  /** Whether this page may change things on the bridge (local page, not OBS / view-only). */
+  canEdit(): boolean
+  /** Show or hide the walker sprite (a world may offer a toggle). */
+  setWalkerVisible(on: boolean): void
+  /** true for `?view=obs`: no world UI either. */
+  obs: boolean
+}
+
 export interface World {
-  /** Whether the app shows the walker sprite over this world. */
+  /** Whether the app shows the walker sprite over this world when it starts. */
   readonly showsWalker: boolean
   /** Build the scene inside `container` (full-screen, behind the HUD). */
-  init(container: HTMLElement): void | Promise<void>
+  init(container: HTMLElement, ctx: WorldContext): void | Promise<void>
   /**
    * Called every frame. `distanceM` is a monotonic odometer (never jumps back), `speedKmh`
    * the smoothed belt speed, `dt` seconds since the previous frame.

@@ -57,12 +57,29 @@ does the pull, install and build in one go (see the root README).
 | `bridge.ts` | `/live` WebSocket (reconnects with backoff) and HTTP API. One client id per browser, kept across reloads, so a refresh is "the same client back" within the bridge's 5 s grace period. |
 | `motion.ts` | Samples arrive at 1-2 Hz; this makes them smooth at 60 fps. Speed: EMA (0.6 s). World odometer: speed x dt per frame, never jumps. HUD distance: the same integration held inside the pad's 10 m buckets. Time: interpolated, never ahead of the pad by more than 1.5 s. Cadence: speed / step length, with step length calibrated from the pad's step counter. |
 | `walker.ts` | 4-frame back-view sprite, lower centre. 1-2-3-4 = 2 steps, so frame rate follows cadence. 80 ms crossfade between frames, a subtle bob per step, frame 1 when stopped. |
-| `worlds/` | `World` interface (`init`, `update(distance, speed, dt)`, `dispose`, `showsWalker`) and the registry the menu is built from. `placeholder`: flat ground, grid, trees and 100 m signposts on a 2D canvas. `overlay`: nothing (for OBS). |
+| `worlds/` | `World` interface (`init(container, ctx)`, `update(distance, speed, dt)`, `dispose`, `showsWalker`; `ctx` gives the bridge client, `canEdit()` and `setWalkerVisible()`) and the registry the menu is built from. `placeholder`: flat ground, grid, trees and 100 m signposts on a 2D canvas. `youtube`: see below. `overlay`: nothing (for OBS). |
+| `worlds/videosync.ts` | Belt -> video: rate = belt speed / video pace, snapped to `getAvailablePlaybackRates()` with 4 % hysteresis (log scale); pause when the belt stops, play when it moves (muted retry if the browser blocks sound); position reported every 10 s and on pause. Pure logic, unit-tested with a fake player. |
 | `controls.ts` | Start (with a chosen speed), big STOP, -/+ 0.5, presets up to the cap; Space/Esc = stop, arrows = -/+. Shows target vs belt speed while ramping, and "Starting…" during the pad's countdown. Shown only when `/status` says `control_allowed`; otherwise a "view only" badge. |
 | `stats.ts`, `charts.ts` | Stats page; SVG bar charts (one series, hover tooltips, table view). |
 | `app.ts` | Wires it together: connection pill, HUD, BELT_ABOVE_CAP banner, safety toasts, world menu, the render loop. |
 
 Adding a world: implement `World` in `src/worlds/`, add it to `WORLDS` in `src/worlds/index.ts`.
+
+## YouTube walk world
+
+A walking-tour video, full screen, first person (the walker is hidden; the toolbar's "walker"
+box shows it, remembered per browser). Uses the official YouTube IFrame Player API.
+
+- **Videos** opens the library (stored in the bridge's SQLite): paste a YouTube link (watch,
+  youtu.be, shorts, live, embed; a `t=` start time is kept), set its **pace**, the walking speed
+  of whoever filmed it (default 4.5 km/h). The title comes from YouTube automatically.
+- Playback rate = belt speed ÷ pace, e.g. belt 4.0, pace 4.5 → 0.89 → **1×**; belt 3.0 → 0.67
+  → **0.75×** (YouTube offers 0.25-2× in 0.25 steps). The toolbar shows the rate.
+- The video pauses (dimmed) when the belt stops and plays when it moves; each video resumes
+  where the last session left it (saved every 10 s and on pause; restarts from 0 after the end).
+- Session stats still come from the pad; the video is only scenery.
+- Editing the library needs a local page (like belt control); view-only and OBS pages just play
+  the most recently played video. Some videos do not allow embedding: the world says so.
 
 ## Config
 

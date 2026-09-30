@@ -5,6 +5,8 @@ Read-only for everyone who can reach it (the Cloudflare Tunnel adds Cloudflare A
 Control, localhost/LAN only (see access.py), with an `X-Client-Id` header naming a client that has
 /live open (so the belt stops if that client goes away):
   POST /control/start {"kmh": 1.5}, POST /control/speed {"kmh": 2.0}, POST /control/stop
+Video library for the YouTube world: GET /videos for everyone; POST /videos, PATCH and DELETE
+/videos/{id} localhost/LAN only with `X-Client-Id` (remote access is read-only), no /live needed.
 The custom header also makes browsers send a CORS preflight, which only this origin passes, so a
 page from another site cannot drive the belt through a LAN browser.
 """
@@ -21,7 +23,7 @@ from typing import Annotated, Any
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 from starlette.types import Receive, Scope, Send
 from pydantic import BaseModel, Field
@@ -32,6 +34,8 @@ from .backend import BackendError
 from .config import Config
 from .service import BridgeService, ControlError, sample_message
 from .stats import compute_stats
+from .storage import DEFAULT_PACE_KMH
+from .youtube import parse_youtube_url
 
 log = logging.getLogger(__name__)
 
@@ -46,6 +50,18 @@ API: <a href="/status">/status</a>, <a href="/stats">/stats</a>, <a href="/sessi
 
 class SpeedRequest(BaseModel):
     kmh: float = Field(gt=0, allow_inf_nan=False)
+
+
+class VideoCreate(BaseModel):
+    url: str = Field(min_length=1, max_length=500)
+    title: str = Field(default="", max_length=200)
+    pace_kmh: float = Field(default=DEFAULT_PACE_KMH, ge=1, le=10, allow_inf_nan=False)
+
+
+class VideoUpdate(BaseModel):
+    title: str | None = Field(default=None, max_length=200)
+    pace_kmh: float | None = Field(default=None, ge=1, le=10, allow_inf_nan=False)
+    position_s: float | None = Field(default=None, ge=0, le=86400, allow_inf_nan=False)
 
 
 def create_app(service: BridgeService, config: Config) -> FastAPI:
@@ -179,6 +195,41 @@ def create_app(service: BridgeService, config: Config) -> FastAPI:
     @app.post("/control/stop")
     async def control_stop(client: str = client_dep) -> dict[str, Any]:
         return await run_control(service.control_stop(client))
+
+    # --- video library (YouTube world) -----------------------------------------------------------
+
+    @app.get("/videos")
+    async def videos() -> dict[str, Any]:
+        return {"videos": service.store.list_videos()}
+
+    @app.post("/videos", status_code=201)
+    async def add_video(body: VideoCreate, response: Response, _client: str = client_dep) -> dict[str, Any]:
+        try:
+            ref = parse_youtube_url(body.url)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        video, created = service.store.add_video(
+            ref.video_id, body.url.strip(), body.title.strip(), body.pace_kmh, ref.start_s,
+            service.wall_clock(),
+        )
+        if not created:
+            response.status_code = 200  # already in the library
+        return video
+
+    @app.patch("/videos/{video_id}")
+    async def update_video(video_id: int, body: VideoUpdate, _client: str = client_dep) -> dict[str, Any]:
+        fields = body.model_dump(exclude_none=True)
+        if "title" in fields:
+            fields["title"] = fields["title"].strip()
+        video = service.store.update_video(video_id, fields, service.wall_clock())
+        if video is None:
+            raise HTTPException(404, "no such video")
+        return video
+
+    @app.delete("/videos/{video_id}", status_code=204)
+    async def delete_video(video_id: int, _client: str = client_dep) -> None:
+        if not service.store.delete_video(video_id):
+            raise HTTPException(404, "no such video")
 
     # --- the web app ---------------------------------------------------------------------------
 

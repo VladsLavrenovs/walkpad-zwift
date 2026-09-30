@@ -12,6 +12,8 @@ Type=exec
 WorkingDirectory=%h/Documents/Projects/walkingpad/walkpad-zwift/bridge
 ExecStart=%h/Documents/Projects/walkingpad/walkpad-zwift/bridge/.venv/bin/walkpad-bridge -v serve
 Environment=PYTHONUNBUFFERED=1
+# Secrets (e.g. ORS_API_KEY for route planning). Optional ("-"); chmod 600. Never in the repo.
+EnvironmentFile=-%h/.config/walkpad/secrets.env
 # On stop, the bridge stops the belt and waits for it; give it time before a hard kill.
 KillSignal=SIGTERM
 TimeoutStopSec=45

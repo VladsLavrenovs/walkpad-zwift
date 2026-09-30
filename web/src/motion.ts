@@ -51,6 +51,8 @@ export class Motion {
   steps: number | null = null
   /** Calibrated step length, metres (null: not calibrated yet, use the model). */
   stepLengthM: number | null = null
+  /** Metres moved in the last frame (for anything that advances with the world). */
+  lastMetres = 0
 
   private reportedKmh = 0
   private padDistance = 0
@@ -95,6 +97,7 @@ export class Motion {
     this.speedKmh += (this.reportedKmh - this.speedKmh) * emaAlpha(dt, TAU_S)
     if (this.reportedKmh === 0 && this.speedKmh < STOPPED_KMH) this.speedKmh = 0
     const metres = (this.speedKmh / 3.6) * dt
+    this.lastMetres = metres
     this.odometerM += metres
     this.distanceM = Math.min(this.distanceM + metres, this.padDistance + this.resolution)
     if (this.running) {

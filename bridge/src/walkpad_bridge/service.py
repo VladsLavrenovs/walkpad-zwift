@@ -27,6 +27,7 @@ from .backend import BackendError, BeltState, PadBackend, Sample
 from .clock import Clock, MonotonicClock
 from .config import Config
 from .recorder import SessionRecorder
+from .routes import RouteProgress
 from .safety import SafetyError, SafetyEvent, SpeedController
 from .storage import Store
 from .udp import UdpSender
@@ -54,7 +55,15 @@ async def wait_until_moving(backend: PadBackend, timeout_s: float = START_CONFIR
     raise BackendError("connection lost while waiting for the belt to start")
 
 
-def sample_message(sample: Sample, t: float, session_id: int | None) -> dict[str, Any]:
+def route_summary(route: dict[str, Any] | None) -> dict[str, Any] | None:
+    if route is None:
+        return None
+    return {k: route[k] for k in ("id", "name", "distance_m", "progress_m", "completed_at")}
+
+
+def sample_message(
+    sample: Sample, t: float, session_id: int | None, route: dict[str, Any] | None = None
+) -> dict[str, Any]:
     return {
         "type": "sample",
         "t": round(t, 3),
@@ -64,6 +73,9 @@ def sample_message(sample: Sample, t: float, session_id: int | None) -> dict[str
         "elapsed_s": sample.elapsed_s,
         "belt": str(sample.belt),
         "session_id": session_id,
+        # Distance along the active route (persists across sessions), or null.
+        "route_id": route["id"] if route else None,
+        "route_progress_m": route["progress_m"] if route else None,
     }
 
 
@@ -87,6 +99,8 @@ class BridgeService:
             store, protocol_name, config.storage.min_session_s, wall_clock
         )
         self.controller: SpeedController | None = None
+        self.routes = RouteProgress(store, wall_clock)
+        self.route: dict[str, Any] | None = store.active_route()
         self.last_sample: Sample | None = None
         self.udp = UdpSender(config.udp.host, config.udp.port) if config.udp.enabled else None
         self._subscribers: set[asyncio.Queue[dict[str, Any]]] = set()
@@ -185,9 +199,12 @@ class BridgeService:
             self.controller.observe(sample)
         try:
             self.recorder.on_sample(sample)
+            moved = self.routes.on_distance(self.recorder.session_id, self.recorder.totals.distance_m)
+            if moved is not None:
+                self.route = moved
         except Exception:
             log.exception("could not record sample")  # storage trouble must not stop live data
-        message = sample_message(sample, self.wall_clock(), self.recorder.session_id)
+        message = sample_message(sample, self.wall_clock(), self.recorder.session_id, self.route)
         self._broadcast(message)
         if self.udp is not None:
             self.udp.send(message)
@@ -230,8 +247,14 @@ class BridgeService:
             "target_kmh": c.target_kmh if c else None,
             "controlling_client": c.controlling_client if c else None,
             "session_id": self.recorder.session_id,
+            "route": route_summary(self.route),
             "error": self._last_error,
         }
+
+    def route_changed(self) -> None:
+        """The active route or its progress was changed through the API."""
+        self.route = self.store.active_route()
+        self._broadcast(self.status())
 
     # --- clients and control ----------------------------------------------------------------
 

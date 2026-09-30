@@ -1,5 +1,5 @@
-"""SQLite storage: walking sessions and their per-second samples, and the video library
-(stdlib sqlite3).
+"""SQLite storage: walking sessions and their per-second samples, the video library, and
+routes with their progress (stdlib sqlite3).
 
 Session totals are updated with every stored sample, so a crash or power cut leaves a session
 with correct totals; it is closed (ended_at = its last sample) on the next start.
@@ -7,6 +7,7 @@ with correct totals; it is closed (ended_at = its last sample) on the next start
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
@@ -49,9 +50,23 @@ CREATE TABLE IF NOT EXISTS videos (
     created_at     REAL NOT NULL,
     last_played_at REAL
 );
+
+-- v3: routes (GPX imports and planned walks). Progress persists across sessions.
+CREATE TABLE IF NOT EXISTS routes (
+    id             INTEGER PRIMARY KEY,
+    name           TEXT NOT NULL,
+    source         TEXT NOT NULL,          -- gpx | ors
+    points         TEXT NOT NULL,          -- JSON [[lat, lon], ...]
+    distance_m     REAL NOT NULL,
+    progress_m     REAL NOT NULL DEFAULT 0,
+    active         INTEGER NOT NULL DEFAULT 0, -- at most one route is active
+    created_at     REAL NOT NULL,
+    last_walked_at REAL,
+    completed_at   REAL
+);
 """
-# v1 -> v2 only adds a table, which CREATE ... IF NOT EXISTS does on open.
-SCHEMA_VERSION = 2
+# v1 -> v2 -> v3 only add tables, which CREATE ... IF NOT EXISTS does on open.
+SCHEMA_VERSION = 3
 DEFAULT_PACE_KMH = 4.5
 VIDEO_FIELDS = ("title", "pace_kmh", "position_s")
 
@@ -208,9 +223,90 @@ class Store:
     def delete_video(self, id: int) -> bool:
         return self.db.execute("DELETE FROM videos WHERE id = ?", (id,)).rowcount > 0
 
+    # --- routes -------------------------------------------------------------------------------
+
+    def add_route(self, name: str, source: str, points: list[tuple[float, float]], distance_m: float,
+                  now: float) -> dict[str, Any]:
+        cur = self.db.execute(
+            "INSERT INTO routes (name, source, points, distance_m, created_at) VALUES (?, ?, ?, ?, ?)",
+            (name, source, json.dumps(points, separators=(",", ":")), distance_m, now),
+        )
+        assert cur.lastrowid is not None
+        route = self.get_route(cur.lastrowid, with_points=False)
+        assert route is not None
+        return route
+
+    def list_routes(self) -> list[dict[str, Any]]:
+        rows = self.db.execute(f"SELECT {ROUTE_SUMMARY} FROM routes ORDER BY active DESC, "
+                               "last_walked_at IS NULL, last_walked_at DESC, created_at DESC")
+        return [_route(r) for r in rows]
+
+    def get_route(self, id: int, with_points: bool = True) -> dict[str, Any] | None:
+        cols = "*" if with_points else ROUTE_SUMMARY
+        row = self.db.execute(f"SELECT {cols} FROM routes WHERE id = ?", (id,)).fetchone()
+        return None if row is None else _route(row)
+
+    def active_route(self) -> dict[str, Any] | None:
+        row = self.db.execute(f"SELECT {ROUTE_SUMMARY} FROM routes WHERE active = 1").fetchone()
+        return None if row is None else _route(row)
+
+    def set_active_route(self, id: int | None) -> bool:
+        """Make `id` the active route (None: no route). False if there is no such route."""
+        with self.db:
+            self.db.execute("BEGIN")
+            exists = self.db.execute("SELECT 1 FROM routes WHERE id = ?", (id,)).fetchone()
+            if id is not None and exists is None:
+                return False
+            self.db.execute("UPDATE routes SET active = 0 WHERE active = 1")
+            if id is not None:
+                self.db.execute("UPDATE routes SET active = 1 WHERE id = ?", (id,))
+        return True
+
+    def update_route(self, id: int, name: str | None, progress_m: float | None) -> dict[str, Any] | None:
+        route = self.get_route(id, with_points=False)
+        if route is None:
+            return None
+        if name is not None:
+            self.db.execute("UPDATE routes SET name = ? WHERE id = ?", (name, id))
+        if progress_m is not None:
+            progress = min(max(0.0, progress_m), route["distance_m"])
+            completed = route["completed_at"] if progress >= route["distance_m"] else None
+            self.db.execute("UPDATE routes SET progress_m = ?, completed_at = ? WHERE id = ?",
+                            (progress, completed, id))
+        return self.get_route(id, with_points=False)
+
+    def advance_active_route(self, delta_m: float, now: float) -> dict[str, Any] | None:
+        """Add walked distance to the active route (stops at its end). The route, or None."""
+        route = self.active_route()
+        if route is None or route["progress_m"] >= route["distance_m"]:
+            return route
+        progress = min(route["distance_m"], route["progress_m"] + delta_m)
+        completed = now if progress >= route["distance_m"] else None
+        self.db.execute(
+            "UPDATE routes SET progress_m = ?, last_walked_at = ?, completed_at = COALESCE(completed_at, ?)"
+            " WHERE id = ?",
+            (progress, now, completed, route["id"]),
+        )
+        return self.get_route(route["id"], with_points=False)
+
+    def delete_route(self, id: int) -> bool:
+        return self.db.execute("DELETE FROM routes WHERE id = ?", (id,)).rowcount > 0
+
     def finished_sessions(self) -> list[dict[str, Any]]:
         rows = self.db.execute("SELECT * FROM sessions WHERE ended_at IS NOT NULL ORDER BY started_at")
         return [_session(r) for r in rows]
+
+
+ROUTE_SUMMARY = ("id, name, source, distance_m, progress_m, active, created_at, last_walked_at,"
+                 " completed_at")
+
+
+def _route(row: sqlite3.Row) -> dict[str, Any]:
+    route = dict(row)
+    route["active"] = bool(route["active"])
+    if "points" in route:
+        route["points"] = json.loads(route["points"])
+    return route
 
 
 def _session(row: sqlite3.Row) -> dict[str, Any]:

@@ -10,7 +10,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from test_server import H, LAN, make_client
-from walkpad_bridge.storage import Store
+from walkpad_bridge.storage import SCHEMA_VERSION, Store
 from walkpad_bridge.youtube import parse_youtube_url
 
 ID = "aBcDeFgHiJ1"
@@ -45,7 +45,7 @@ def test_rejects_other_links(url: str) -> None:
         parse_youtube_url(url)
 
 
-def test_v1_database_gains_the_video_table_and_keeps_sessions(tmp_path: Path) -> None:
+def test_v1_database_gains_the_new_tables_and_keeps_sessions(tmp_path: Path) -> None:
     path = tmp_path / "old.sqlite"
     db = sqlite3.connect(path)
     db.executescript(
@@ -59,7 +59,8 @@ def test_v1_database_gains_the_video_table_and_keeps_sessions(tmp_path: Path) ->
     store = Store(path)
     assert store.count_sessions() == 1
     assert store.list_videos() == []
-    assert store.db.execute("PRAGMA user_version").fetchone()[0] == 2
+    assert store.list_routes() == []
+    assert store.db.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
 
 
 def test_store_videos(tmp_path: Path) -> None:

@@ -10,6 +10,15 @@ possible. Tick them off there.
       it still answers after 25+ min at the login screen, and with the lid closed on AC.
 - [ ] Login-screen idle suspend set for `gdm` (needs sudo; could not be verified remotely).
 
+## Routes (needs an ORS key)
+
+- [ ] Add `ORS_API_KEY` to `~/.config/walkpad/secrets.env` (docs/keys.md), restart the service.
+- [ ] Routes page: plan a walk near home (start, end, "Get walking route"): a sensible path
+      along streets, with a distance; "Save & walk it" makes it active.
+- [ ] Walk a few minutes: the minimap dot moves, the route card's progress grows; stop, start
+      again later: progress continues where it stopped.
+- [ ] Import a real GPX file (e.g. exported from a hiking app): name and length look right.
+
 ## Prompt 8 (Cloudflare: Pages deploy, Tunnel, Access)
 
 - [ ] Through the tunnel (`https://walkpad-bridge.connectedovals.com`), control is refused:

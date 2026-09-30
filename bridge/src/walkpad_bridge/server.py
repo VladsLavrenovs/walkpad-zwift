@@ -7,6 +7,9 @@ Control, localhost/LAN only (see access.py), with an `X-Client-Id` header naming
   POST /control/start {"kmh": 1.5}, POST /control/speed {"kmh": 2.0}, POST /control/stop
 Video library for the YouTube world: GET /videos for everyone; POST /videos, PATCH and DELETE
 /videos/{id} localhost/LAN only with `X-Client-Id` (remote access is read-only), no /live needed.
+Routes: GET /routes, /routes/{id} for everyone; importing (POST /routes/gpx), planning via
+OpenRouteService (POST /routes/plan; the key stays on the bridge), saving, editing, choosing the
+active route and deleting are localhost/LAN only, like the video library.
 The custom header also makes browsers send a CORS preflight, which only this origin passes, so a
 page from another site cannot drive the belt through a LAN browser.
 """
@@ -21,7 +24,7 @@ from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Annotated, Any
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, WebSocket
+from fastapi import Body, Depends, FastAPI, Header, HTTPException, Query, Request, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
@@ -35,7 +38,11 @@ from .config import Config
 from .service import BridgeService, ControlError, sample_message
 from .stats import compute_stats
 from .storage import DEFAULT_PACE_KMH
+from .ors import OrsError, plan_walk
+from .routes import clean_points, parse_gpx, route_length_m
 from .youtube import parse_youtube_url
+
+MAX_GPX_BYTES = 5_000_000
 
 log = logging.getLogger(__name__)
 
@@ -56,6 +63,28 @@ class VideoCreate(BaseModel):
     url: str = Field(min_length=1, max_length=500)
     title: str = Field(default="", max_length=200)
     pace_kmh: float = Field(default=DEFAULT_PACE_KMH, ge=1, le=10, allow_inf_nan=False)
+
+
+LatLon = Annotated[list[float], Field(min_length=2, max_length=2)]
+
+
+class PlanRequest(BaseModel):
+    waypoints: list[LatLon] = Field(min_length=2, max_length=10)
+
+
+class RouteCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    source: str = Field(default="ors", pattern="^(ors|gpx)$")
+    points: list[LatLon] = Field(min_length=2)
+
+
+class RouteUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=200)
+    progress_m: float | None = Field(default=None, ge=0, allow_inf_nan=False)
+
+
+class ActiveRoute(BaseModel):
+    id: int | None
 
 
 class VideoUpdate(BaseModel):
@@ -166,7 +195,7 @@ def create_app(service: BridgeService, config: Config) -> FastAPI:
             if service.last_sample is not None and service.backend.is_connected:
                 await websocket.send_json(
                     sample_message(service.last_sample, service.wall_clock(),
-                                   service.recorder.session_id)
+                                   service.recorder.session_id, service.route)
                 )
             sender = asyncio.create_task(_forward(queue, websocket))
             receiver = asyncio.create_task(_drain(websocket))
@@ -230,6 +259,81 @@ def create_app(service: BridgeService, config: Config) -> FastAPI:
     async def delete_video(video_id: int, _client: str = client_dep) -> None:
         if not service.store.delete_video(video_id):
             raise HTTPException(404, "no such video")
+
+    # --- routes -----------------------------------------------------------------------------------
+
+    @app.get("/routes")
+    async def routes() -> dict[str, Any]:
+        return {"routes": service.store.list_routes()}
+
+    @app.get("/routes/{route_id}")
+    async def route(route_id: int) -> dict[str, Any]:
+        found = service.store.get_route(route_id)
+        if found is None:
+            raise HTTPException(404, "no such route")
+        return found
+
+    @app.post("/routes/gpx", status_code=201)
+    async def import_gpx(
+        request: Request,
+        name: Annotated[str, Query(max_length=200)] = "",
+        _client: str = client_dep,
+    ) -> dict[str, Any]:
+        body = await request.body()
+        if len(body) > MAX_GPX_BYTES:
+            raise HTTPException(413, f"GPX file larger than {MAX_GPX_BYTES // 1_000_000} MB")
+        try:
+            gpx = parse_gpx(body)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        route_name = name.strip() or gpx.name or "Imported route"
+        return service.store.add_route(route_name, "gpx", gpx.points, route_length_m(gpx.points),
+                                       service.wall_clock())
+
+    @app.post("/routes/plan")
+    async def plan_route(body: PlanRequest, _client: str = client_dep) -> dict[str, Any]:
+        """A walking route through the waypoints, from OpenRouteService. Not saved."""
+        try:
+            planned = await plan_walk(clean_points((p[0], p[1]) for p in body.waypoints))
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        except OrsError as exc:
+            raise HTTPException(502, str(exc)) from exc
+        return {"points": planned.points, "distance_m": planned.distance_m}
+
+    @app.post("/routes", status_code=201)
+    async def save_route(body: RouteCreate, _client: str = client_dep) -> dict[str, Any]:
+        try:
+            points = clean_points((p[0], p[1]) for p in body.points)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        return service.store.add_route(body.name.strip(), body.source, points, route_length_m(points),
+                                       service.wall_clock())
+
+    @app.patch("/routes/{route_id}")
+    async def update_route(route_id: int, body: RouteUpdate, _client: str = client_dep) -> dict[str, Any]:
+        updated = service.store.update_route(
+            route_id, body.name.strip() if body.name else None, body.progress_m
+        )
+        if updated is None:
+            raise HTTPException(404, "no such route")
+        service.route_changed()
+        return updated
+
+    @app.put("/routes/active")
+    async def set_active_route(
+        body: Annotated[ActiveRoute, Body()], _client: str = client_dep
+    ) -> dict[str, Any]:
+        if not service.store.set_active_route(body.id):
+            raise HTTPException(404, "no such route")
+        service.route_changed()
+        return {"route": service.route}
+
+    @app.delete("/routes/{route_id}", status_code=204)
+    async def delete_route(route_id: int, _client: str = client_dep) -> None:
+        if not service.store.delete_route(route_id):
+            raise HTTPException(404, "no such route")
+        service.route_changed()
 
     # --- the web app ---------------------------------------------------------------------------
 

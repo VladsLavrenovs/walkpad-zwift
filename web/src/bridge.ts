@@ -13,6 +13,26 @@ export interface SampleMsg {
   elapsed_s: number
   belt: Belt
   session_id: number | null
+  /** Distance along the active route (persists across sessions), or null. */
+  route_id: number | null
+  route_progress_m: number | null
+}
+
+export interface RouteSummary {
+  id: number
+  name: string
+  distance_m: number
+  progress_m: number
+  completed_at: number | null
+}
+
+export interface Route extends RouteSummary {
+  source: 'gpx' | 'ors'
+  active: boolean
+  created_at: number
+  last_walked_at: number | null
+  /** Only from GET /routes/{id}: [[lat, lon], ...] */
+  points?: [number, number][]
 }
 
 export interface StatusMsg {
@@ -25,6 +45,7 @@ export interface StatusMsg {
   target_kmh: number | null
   controlling_client: string | null
   session_id: number | null
+  route: RouteSummary | null
   error: string | null
   /** Only on GET /status: whether this page may control the belt. */
   control_allowed?: boolean
@@ -260,6 +281,48 @@ export class BridgeClient {
 
   deleteVideo(id: number): Promise<void> {
     return this.write('DELETE', `/videos/${id}`)
+  }
+
+  // --- routes -------------------------------------------------------------------------------
+
+  async routes(): Promise<Route[]> {
+    return (await this.get<{ routes: Route[] }>('/routes')).routes
+  }
+
+  route(id: number): Promise<Route> {
+    return this.get<Route>(`/routes/${id}`)
+  }
+
+  async importGpx(file: File, name = ''): Promise<Route> {
+    if (!this.client) throw new ControlError('view only', 403)
+    const res = await fetch(this.url(`/routes/gpx?name=${encodeURIComponent(name)}`), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/gpx+xml', 'X-Client-Id': this.client },
+      body: file,
+    })
+    const data = (await res.json().catch(() => ({}))) as Route & { detail?: unknown }
+    if (!res.ok) throw new ControlError(typeof data.detail === 'string' ? data.detail : `HTTP ${res.status}`, res.status)
+    return data
+  }
+
+  planRoute(waypoints: [number, number][]): Promise<{ points: [number, number][]; distance_m: number }> {
+    return this.write('POST', '/routes/plan', { waypoints })
+  }
+
+  saveRoute(name: string, points: [number, number][]): Promise<Route> {
+    return this.write('POST', '/routes', { name, points, source: 'ors' })
+  }
+
+  updateRoute(id: number, fields: { name?: string; progress_m?: number }): Promise<Route> {
+    return this.write('PATCH', `/routes/${id}`, fields)
+  }
+
+  setActiveRoute(id: number | null): Promise<{ route: RouteSummary | null }> {
+    return this.write('PUT', '/routes/active', { id })
+  }
+
+  deleteRoute(id: number): Promise<void> {
+    return this.write('DELETE', `/routes/${id}`)
   }
 
   start(kmh: number): Promise<StatusMsg> {

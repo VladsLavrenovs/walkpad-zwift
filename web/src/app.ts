@@ -14,7 +14,10 @@ import {
 import type { AppConfig } from './config'
 import { Controls } from './controls'
 import { fmtDistance, fmtDuration, fmtSpeed } from './format'
-import { Motion } from './motion'
+import { Motion, distanceResolution } from './motion'
+import { Minimap } from './routes/minimap'
+import { RoutesPage } from './routes/page'
+import { RouteTracker } from './routes/progress'
 import { StatsPage } from './stats'
 import { Walker } from './walker'
 import { WORLDS, findWorld } from './worlds'
@@ -30,6 +33,9 @@ export class App {
   private readonly walker: Walker
   private readonly controls: Controls | null
   private readonly stats: StatsPage | null
+  private readonly routesPage: RoutesPage | null
+  private readonly minimap: Minimap
+  private readonly routeTracker = new RouteTracker()
   private world: World | null = null
   private worldId = ''
   private status: StatusMsg | null = null
@@ -64,6 +70,7 @@ export class App {
         <span class="badge" hidden>view only</span>
         <span class="spacer"></span>
         <label class="world-menu">World <select></select></label>
+        <a class="link" href="#/routes">Routes</a>
         <a class="link" href="#/stats">Stats</a>
       </div>
       <div class="banner" role="alert" hidden></div>
@@ -90,6 +97,8 @@ export class App {
     this.walker = new Walker(root)
     this.controls = config.obs ? null : new Controls(root, this.bridge, (m) => this.toast(m))
     this.stats = config.obs ? null : new StatsPage(root, this.bridge)
+    this.minimap = new Minimap(root, this.bridge)
+    this.routesPage = config.obs ? null : new RoutesPage(root, this.bridge, () => this.controlAllowed, () => {})
     if (this.controls) this.controls.visible = false
 
     const select = q<HTMLSelectElement>('.world-menu select')
@@ -135,9 +144,12 @@ export class App {
 
   private route(): void {
     const onStats = location.hash === '#/stats' && this.stats !== null
-    this.root.classList.toggle('on-stats', onStats)
+    const onRoutes = location.hash === '#/routes' && this.routesPage !== null
+    this.root.classList.toggle('on-stats', onStats || onRoutes)
     if (onStats) void this.stats!.show()
     else this.stats?.hide()
+    if (onRoutes) void this.routesPage!.show()
+    else this.routesPage?.hide()
   }
 
   private readonly frame = (now: number): void => {
@@ -145,7 +157,12 @@ export class App {
     this.last = now
     const m = this.motion
     m.frame(dt)
-    this.world?.update(m.odometerM, m.speedKmh, dt)
+    // On an active route the world follows the distance along it; otherwise the odometer.
+    const route = this.routeTracker
+    route.advance(m.lastMetres, this.minimap.line?.length ?? Number.POSITIVE_INFINITY)
+    const onRoute = route.routeId !== null
+    this.world?.update(onRoute ? route.position : m.odometerM, m.speedKmh, dt)
+    if (onRoute) this.minimap.update(route.position, dt)
     this.walker.update(m.cadence(), m.speedKmh, dt)
     this.hud.speed.textContent = fmtSpeed(m.speedKmh)
     this.hud.distance.textContent = fmtDistance(m.distanceM)
@@ -157,11 +174,15 @@ export class App {
   private onMessage(msg: BridgeMsg): void {
     if (msg.type === 'sample') {
       this.motion.onSample(msg)
+      this.routeTracker.onReport(msg.route_id, msg.route_progress_m)
       this.controls?.onSample(msg.speed_kmh, msg.belt === 'running')
       this.renderTarget(msg.speed_kmh)
     } else if (msg.type === 'status') {
       this.status = { ...msg, control_allowed: this.status?.control_allowed }
       this.motion.setProtocol(msg.protocol)
+      this.routeTracker.setResolution(distanceResolution(msg.protocol))
+      this.routeTracker.onReport(msg.route?.id ?? null, msg.route?.progress_m ?? null)
+      void this.minimap.setRoute(msg.route ?? null)
       if (!msg.connected) this.motion.onDisconnect()
       this.controls?.onStatus(this.status)
       this.renderStatus()
@@ -178,9 +199,12 @@ export class App {
       this.bridge
         .status()
         .then((s) => {
+          const changed = this.controlAllowed !== (s.control_allowed === true)
           this.controlAllowed = s.control_allowed === true
           this.status = { ...(this.status ?? s), control_allowed: this.controlAllowed }
           this.renderStatus()
+          // A page opened directly at #/routes rendered before this answer: redo it.
+          if (changed && location.hash === '#/routes') void this.routesPage?.show()
         })
         .catch(() => {
           this.controlAllowed = false

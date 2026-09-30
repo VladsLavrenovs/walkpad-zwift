@@ -3,7 +3,10 @@ import type { SampleMsg } from './bridge'
 import { Motion, emaAlpha, modelStepLength } from './motion'
 
 function sample(p: Partial<SampleMsg>): SampleMsg {
-  return { type: 'sample', t: 0, speed_kmh: 0, distance_m: 0, steps: 0, elapsed_s: 0, belt: 'running', session_id: 1, ...p }
+  return {
+    type: 'sample', t: 0, speed_kmh: 0, distance_m: 0, steps: 0, elapsed_s: 0, belt: 'running', session_id: 1,
+    route_id: null, route_progress_m: null, ...p,
+  }
 }
 
 /** Run `seconds` of 60 fps frames. */

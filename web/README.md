@@ -65,6 +65,25 @@ does the pull, install and build in one go (see the root README).
 
 Adding a world: implement `World` in `src/worlds/`, add it to `WORLDS` in `src/worlds/index.ts`.
 
+## Routes
+
+`#/routes` lists routes (progress bar; walk this / stop using / reset / rename / delete),
+imports GPX files, and plans walks on a Leaflet + OpenStreetMap map: click a start, an end (and
+stops in between), "Get walking route" asks the bridge, which asks OpenRouteService (the key
+never reaches the browser), then save it. Editing needs the local page.
+
+While a route is active, a minimap (top right) shows it, the walked part and where you are,
+and the placeholder world moves by the distance along the route, so the same stretch of route
+always has the same scenery. Progress is stored by the bridge, so a long route takes many walks.
+
+| Module | Role |
+|---|---|
+| `routes/geo.ts` | Distances along a `[lat, lon]` polyline, the point and heading at a distance. |
+| `routes/progress.ts` | `RouteTracker`: smooth position along the route between samples (within the pad's 10 m steps). |
+| `routes/minimap.ts`, `routes/page.ts`, `routes/map.ts` | Minimap, Routes page, Leaflet/OSM setup. |
+
+New dependency: `leaflet` (the standard small 2D map library; OpenStreetMap tiles, credited).
+
 ## YouTube walk world
 
 A walking-tour video, full screen, first person (the walker is hidden; the toolbar's "walker"

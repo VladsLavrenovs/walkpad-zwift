@@ -106,6 +106,14 @@ real pad. Stopping the service (Ctrl+C, SIGTERM) stops the belt and closes the o
 | `POST /videos {"url": "...", "pace_kmh": 4.5}` | localhost/LAN | add a YouTube link (201; 200 if already there; 422 not a YouTube link) |
 | `PATCH /videos/{id} {"title"?, "pace_kmh"?, "position_s"?}` | localhost/LAN | edit; a new position also marks it last played |
 | `DELETE /videos/{id}` | localhost/LAN | remove |
+| `GET /routes` | anyone | routes (no points), active first |
+| `GET /routes/{id}` | anyone | one route with its points `[[lat, lon], ...]` |
+| `POST /routes/gpx?name=...` (body: the GPX file) | localhost/LAN | import track points (else route points), segments joined; 5 MB max |
+| `POST /routes/plan {"waypoints": [[lat, lon], ...]}` | localhost/LAN | walking route from OpenRouteService (2-10 waypoints); not saved |
+| `POST /routes {"name", "points"}` | localhost/LAN | save a (planned) route |
+| `PATCH /routes/{id} {"name"?, "progress_m"?}` | localhost/LAN | rename, or set/reset progress |
+| `PUT /routes/active {"id": n or null}` | localhost/LAN | the route walking moves along |
+| `DELETE /routes/{id}` | localhost/LAN | remove |
 
 Control responses are the new status plus `applied_target_kmh`: the target **after** the cap, not
 the request echoed. Errors: 403 not allowed from here, 409 not possible now (no WebSocket for this
@@ -130,11 +138,17 @@ reports it stopped or the pad connection drops. A connection that comes back wit
 the pad's counters still running resumes the same session instead of starting a second one. Totals come from the pad's counters, carried
 across the resets the pad does while slowing down. At most one sample per second is stored.
 Sessions under `min_session_s` (10 s) are dropped. A crash leaves correct totals; the session is
-closed on the next start. Database: `bridge/data/walkpad.sqlite` (schema v2: v1 databases gain
-the `videos` table on the next start; sessions are untouched).
+closed on the next start. Database: `bridge/data/walkpad.sqlite` (schema v3: older databases gain
+the `videos` and `routes` tables on the next start; sessions are untouched).
 
 **Stats**: local time of the laptop. A streak day needs 60 s of walking; the current streak
 still counts until today is over. Fastest average speed only counts sessions of 5+ minutes.
+
+**Routes**: walking moves the active route along: every sample's new session distance is added
+to its stored progress (only increases count, so restarts, counter resets or switching routes
+never move it back or double-count), up to its end (then `completed_at` is set). Sample
+messages carry `route_id` and `route_progress_m`; status carries `route`. The ORS key lives in
+`~/.config/walkpad/secrets.env` for the service or `bridge/.env` for dev runs (docs/keys.md).
 
 **UDP** (`[udp] enabled = true`, `host`, `port`): every `sample` message as one JSON datagram,
 fire and forget.
@@ -180,6 +194,9 @@ On Windows (dev only) the signals are Ctrl+C and Ctrl+Break; SIGTERM there is an
 | `server.py` | FastAPI app: endpoints above, CORS, the web app. |
 | `udp.py` | `UdpSender`: JSON datagrams. |
 | `youtube.py` | YouTube link parsing (id and `t=` start) for the video library. |
+| `routes.py` | GPX parsing, route geometry, `RouteProgress` (walked distance -> active route). |
+| `ors.py` | OpenRouteService walking directions (stdlib HTTP, key from the environment). |
+| `secrets.py` | Secrets from the environment (systemd `EnvironmentFile`) or `bridge/.env`. |
 | `lag.py` | `LagMeter`: command-to-effect lag from SpeedController command events and samples. |
 | `safety.py` | `SpeedController`: the **only** code allowed to call `backend.set_speed` (a test enforces this). |
 | `clock.py` | Injectable clock, so tests run ramps on virtual time. |

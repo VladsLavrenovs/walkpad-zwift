@@ -45,6 +45,12 @@ sudo ufw allow from 192.168.0.0/16 to any port 8080 proto tcp
 
 Then open `http://<laptop-ip>:8080` on a phone or PC on the same Wi-Fi.
 
+## Secrets (route planner key)
+
+The unit reads optional secrets from `~/.config/walkpad/secrets.env` (`EnvironmentFile=-...`,
+outside the repo, `chmod 600`). Today that is `ORS_API_KEY` for the route planner; see
+[keys.md](keys.md). Restart the service after changing it.
+
 ## Keep the laptop awake (required)
 
 **Why:** if the laptop suspends while you walk, the Bluetooth link drops, and **the belt keeps

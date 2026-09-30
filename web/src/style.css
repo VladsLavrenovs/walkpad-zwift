@@ -167,13 +167,46 @@ button:disabled { cursor: not-allowed; opacity: 0.45; }
 .controls .presets { display: flex; gap: 6px; }
 .controls .presets button { flex: 1; height: 36px; font-variant-numeric: tabular-nums; }
 
+/* --- minimap ----------------------------------------------------------------------------- */
+.minimap {
+  position: absolute; top: 52px; right: 14px; width: min(260px, 40vw); border-radius: 12px; overflow: hidden;
+  background: var(--panel); border: 1px solid var(--line); box-shadow: 0 4px 16px #0006;
+}
+.minimap-map { height: 170px; }
+.minimap-label { padding: 5px 8px; font-size: 13px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.minimap .leaflet-control-attribution { font-size: 9px; }
+
 /* --- stats page -------------------------------------------------------------------------- */
-.on-stats > .world, .on-stats > .walker, .on-stats > .hud, .on-stats > .topbar { visibility: hidden; }
+.on-stats > .world, .on-stats > .walker, .on-stats > .hud, .on-stats > .topbar, .on-stats > .minimap { visibility: hidden; }
 .on-stats .yt-toolbar, .on-stats .yt-panel { display: none; }
-.stats-page {
+.stats-page, .routes-page {
   position: absolute; inset: 0; overflow: auto; padding: 20px max(16px, calc(50vw - 460px)) 180px;
   background: var(--surface-1); color: var(--surface-ink); color-scheme: light dark;
 }
+.routes-page header { display: flex; justify-content: space-between; align-items: baseline; }
+.routes-page h1 { margin: 0 0 6px; font-size: 26px; }
+.routes-page h2 { font-size: 17px; margin: 28px 0 8px; }
+.routes-page .muted { color: var(--surface-ink-2); }
+.routes-page .link { color: var(--series-1); }
+.routes-page .error { color: var(--bad); font-weight: 600; }
+.routes-page button, .routes-page input {
+  font: inherit; padding: 6px 10px; border-radius: 8px; border: 1px solid var(--surface-line);
+  background: var(--surface-1); color: var(--surface-ink);
+}
+.routes-page button { cursor: pointer; }
+.routes-page button:disabled { opacity: 0.45; }
+.route-list { display: flex; flex-direction: column; gap: 10px; margin-top: 12px; }
+.route-card { border: 1px solid var(--surface-line); border-radius: 12px; padding: 12px 14px; display: flex; flex-direction: column; gap: 6px; }
+.route-card.active { border-color: var(--series-1); box-shadow: 0 0 0 1px var(--series-1); }
+.route-head { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+.route-head b { font-size: 16px; }
+.tag { font-size: 12px; padding: 1px 8px; border-radius: 999px; background: var(--series-1); color: #fff; }
+.tag.done { background: #1baf7a; }
+.bar { height: 8px; border-radius: 4px; background: var(--surface-line); overflow: hidden; }
+.bar > div { height: 100%; background: var(--series-1); border-radius: 4px; }
+.route-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.gpx-form, .plan-save, .planner-bar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 8px 0; }
+.planner-map { height: min(440px, 60vh); border-radius: 12px; border: 1px solid var(--surface-line); }
 .stats-page header { display: flex; justify-content: space-between; align-items: baseline; }
 .stats-page h1 { margin: 0 0 12px; font-size: 26px; }
 .stats-page h2 { font-size: 17px; margin: 28px 0 10px; }
@@ -213,6 +246,7 @@ button:disabled { cursor: not-allowed; opacity: 0.45; }
 html.obs { color-scheme: normal; }
 html.obs, html.obs body { background: transparent; }
 .obs .topbar, .obs .controls, .obs .badge, .obs .toast { display: none !important; }
+.obs .minimap { top: 14px; }
 
 @media (max-width: 640px) {
   .hud { top: 50px; gap: 4px; padding: 8px; }

@@ -154,7 +154,7 @@ async def test_configured_ramp_rate(walking_fake: FakeBackend, clock: VirtualClo
     assert_ramp_respected(walking_fake, (0.0, 3.0), 0.2)
 
 
-async def test_ramp_after_start_begins_at_device_min(
+async def test_ramp_after_start_pins_one_step_from_actual_then_ramps(
     make_fake: MakeFake, clock: VirtualClock
 ) -> None:
     fake = make_fake()
@@ -163,19 +163,25 @@ async def test_ramp_after_start_begins_at_device_min(
     await controller.start()
     await controller.set_speed(2.0)
     await controller.wait_until_reached()
-    assert [v for _, v in speed_commands(fake)] == [1.0, 1.5, 2.0]
-    assert_ramp_respected(fake, (0.0, 0.5), 0.5)
+    # The pin is sent at once (stopping a pad's own run-up): one step from the belt's speed
+    # (device min 0.5 here) towards the target.
+    commands = speed_commands(fake)
+    assert [v for _, v in commands] == [1.0, 1.5, 2.0]
+    assert commands[0][0] == 0.0
+    for (t0, v0), (t1, v1) in zip(commands, commands[1:]):
+        assert t1 > t0 and abs(v1 - v0) <= 0.5 * (t1 - t0) + 1e-9
 
 
-async def test_ramp_from_belt_already_above_cap_goes_down_gradually(
+async def test_ramp_from_belt_above_cap_commands_the_cap_first(
     make_fake: MakeFake, clock: VirtualClock
 ) -> None:
     fake = make_fake(initial_speed_kmh=5.0)  # e.g. set by the pad's own remote
     await fake.connect()
     controller = SpeedController(fake, SafetyConfig(max_speed_kmh=4.0), clock)
-    await controller.set_speed(6.0)
+    await controller.set_speed(3.0)
     await controller.wait_until_reached()
-    assert [v for _, v in speed_commands(fake)] == [4.5, 4.0]
+    # Never a command above the cap: straight to 4.0 (at once), then the normal ramp.
+    assert speed_commands(fake) == [(0.0, 4.0), (1.0, 3.5), (2.0, 3.0)]
 
 
 async def test_set_speed_requires_running_belt(make_fake: MakeFake, clock: VirtualClock) -> None:
@@ -331,13 +337,20 @@ async def test_client_disconnect_with_stopped_belt_sends_nothing(
 # --- single path for speed changes ------------------------------------------------------------
 
 
-def test_only_speed_controller_calls_backend_set_speed() -> None:
-    """Tripwire: no module except safety.py may call a backend's set_speed directly."""
+@pytest.mark.parametrize(
+    ("pattern", "allowed"),
+    [
+        # Belt commands on a backend: only SpeedController.
+        (r"backend\.(set_speed|start|stop)\(", "safety.py"),
+        # Belt commands on a BLE protocol handler: only BleBackend (itself called by the above).
+        (r"\.(set_belt_speed|start_belt|stop_belt)\(", "blebackend.py"),
+    ],
+)
+def test_only_speed_controller_commands_the_belt(pattern: str, allowed: str) -> None:
+    """Tripwire: belt commands reach the pad only through SpeedController."""
     src = Path(__file__).resolve().parents[1] / "src" / "walkpad_bridge"
     offenders = [
-        p.name
-        for p in src.glob("*.py")
-        if p.name != "safety.py" and re.search(r"backend\.set_speed\(", p.read_text())
+        p.name for p in src.glob("*.py") if p.name != allowed and re.search(pattern, p.read_text())
     ]
     assert offenders == []
 
@@ -399,3 +412,30 @@ async def test_failing_event_listener_does_not_break_safety(
     controller.add_event_listener(received.append)
     controller.observe(_sample(5.0))
     assert len(received) == 1
+
+
+# --- command listeners (lag metering) -------------------------------------------------------
+
+
+async def test_command_listener_sees_every_command(
+    make_fake: MakeFake, clock: VirtualClock
+) -> None:
+    fake = make_fake()
+    await fake.connect()
+    controller = SpeedController(fake, SafetyConfig(), clock)
+    seen: list[tuple[str, float | None]] = []
+    controller.add_command_listener(lambda name, kmh: seen.append((name, kmh)))
+    await controller.start()
+    await controller.set_speed(1.5)
+    await controller.wait_until_reached()
+    await controller.stop()
+    assert seen == [
+        ("start", None), ("set_speed", 1.0), ("set_speed", 1.5), ("stop", None)
+    ]
+
+
+async def test_close_reports_its_stop(controller: SpeedController) -> None:
+    seen: list[str] = []
+    controller.add_command_listener(lambda name, _kmh: seen.append(name))
+    await controller.close()
+    assert seen == ["stop"]

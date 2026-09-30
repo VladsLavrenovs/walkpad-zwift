@@ -9,6 +9,8 @@ ramp_tick_s = 1.0
 # If the pad connection drops, reconnect (up to this many tries) and stop the belt.
 reconnect_attempts = 3
 reconnect_backoff_s = 1.0
+# While the bridge controls the belt: stop it if it stays above the cap this long.
+above_cap_stop_s = 5.0
 
 [ble]
 # Default pad address for `live`/`inspect` (find it with `walkpad-bridge scan`). Empty: pass it on the CLI.

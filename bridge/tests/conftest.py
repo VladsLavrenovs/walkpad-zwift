@@ -5,8 +5,20 @@ from collections.abc import Callable
 
 import pytest
 
+from walkpad_bridge import ble
 from walkpad_bridge.fake import FakeBackend
 from walkpad_bridge.safety import SafetyConfig, SpeedController
+
+
+@pytest.fixture(autouse=True)
+def no_real_bluetooth(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Tests never reach a real pad, even though config.toml may name one (CLAUDE.md safety)."""
+
+    async def refuse(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("a test tried to use real Bluetooth; use FakeConnector")
+
+    monkeypatch.setattr(ble, "connect_client", refuse)
+    monkeypatch.setattr(ble, "scan", refuse)
 
 
 class VirtualClock:

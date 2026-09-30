@@ -39,7 +39,10 @@ def test_parse_status() -> None:
         (0, 20, BeltState.STOPPING),
         (0, 0, BeltState.STOPPED),
         (5, 0, BeltState.STOPPED),  # standby
-        (42, 10, BeltState.STOPPING),  # unknown state but moving: never report stopped
+        (8, 0, BeltState.RUNNING),  # countdown, seen on the owner's pad
+        (7, 0, BeltState.RUNNING),
+        (42, 10, BeltState.RUNNING),  # unknown state but moving
+        (42, 0, BeltState.STOPPING),  # unknown state: never report stopped
     ],
 )
 def test_belt_state_mapping(belt_state: int, speed: int, expected: BeltState) -> None:

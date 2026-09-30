@@ -7,9 +7,16 @@ Enforces the safety rules from CLAUDE.md:
 - stop the belt if the pad connection drops (reconnect, then stop) or if the controlling
   client disconnects.
 
-It never forces a belt that is already above the cap (e.g. set with the pad's own remote) down
-on its own; it emits a BELT_ABOVE_CAP safety event so the UI can show it, and the next
-`set_speed` ramps it down gradually.
+While the bridge controls the belt (a client started it or set its speed), the controller also
+holds the belt to what it commanded, fed by `observe()`:
+- right after start it pins the speed the belt is at, so the pad's own run-up to its start-speed
+  setting cannot carry it past the cap (seen on the owner's pad: start speed 2.5 km/h),
+- if the pad reports more than the commanded speed for HOLD_SAMPLES samples, it ramps back down,
+- if the belt stays above the cap for `above_cap_stop_s`, it stops the belt.
+No command is ever above the cap: a belt above the cap is first commanded to the cap itself.
+
+When nobody controls the belt (e.g. it was started with the pad's own remote) a belt above the
+cap is not forced down; it emits a BELT_ABOVE_CAP safety event so the UI can show it.
 """
 
 from __future__ import annotations
@@ -26,6 +33,8 @@ from .clock import Clock, MonotonicClock
 
 log = logging.getLogger(__name__)
 
+HOLD_SAMPLES = 2  # consecutive samples above the commanded speed before correcting
+
 
 @dataclass(frozen=True, slots=True)
 class SafetyConfig:
@@ -34,9 +43,10 @@ class SafetyConfig:
     ramp_tick_s: float = 1.0
     reconnect_attempts: int = 3
     reconnect_backoff_s: float = 1.0
+    above_cap_stop_s: float = 5.0
 
     def __post_init__(self) -> None:
-        for name in ("max_speed_kmh", "max_ramp_kmh_per_s", "ramp_tick_s"):
+        for name in ("max_speed_kmh", "max_ramp_kmh_per_s", "ramp_tick_s", "above_cap_stop_s"):
             value = getattr(self, name)
             if not (math.isfinite(value) and value > 0):
                 raise ValueError(f"safety.{name} must be a positive number, got {value!r}")
@@ -49,6 +59,7 @@ class SafetyConfig:
 class SafetyEventKind(enum.StrEnum):
     BELT_ABOVE_CAP = "belt_above_cap"
     BELT_WITHIN_CAP = "belt_within_cap"  # the above-cap condition cleared
+    FAILSAFE_STOP = "failsafe_stop"  # stayed above the cap under bridge control: stopped
 
 
 @dataclass(frozen=True, slots=True)
@@ -105,6 +116,11 @@ class SpeedController:
         self._connection_lost = False
         self._above_cap = False
         self._event_listeners: list[Callable[[SafetyEvent], None]] = []
+        self._command_listeners: list[Callable[[str, float | None], None]] = []
+        self._pin_on_ramp = False  # set by start(): first ramp step pins the actual speed
+        self._over_commanded = 0
+        self._above_cap_since: float | None = None
+        self._failsafe_task: asyncio.Task[None] | None = None
         self.recovery_task: asyncio.Task[bool] | None = None
         backend.add_connection_lost_listener(self._on_connection_lost)
 
@@ -129,9 +145,17 @@ class SpeedController:
         """`callback` receives SafetyEvents (e.g. for pushing to the UI)."""
         self._event_listeners.append(callback)
 
+    def add_command_listener(self, callback: Callable[[str, float | None], None]) -> None:
+        """`callback(name, kmh)` runs after every command sent to the pad (for lag metering).
+
+        Names: "start", "set_speed" (with kmh), "stop".
+        """
+        self._command_listeners.append(callback)
+
     def observe(self, sample: Sample) -> None:
-        """Feed every live sample here so above-cap belts are detected."""
+        """Feed every live sample here: detects above-cap belts and holds a controlled belt."""
         self._check_cap(sample.speed_kmh)
+        self._hold(sample)
 
     def clamp(self, kmh: float) -> float:
         """The speed a request would actually be clamped to. Raises on nonsense input."""
@@ -141,9 +165,12 @@ class SpeedController:
         self._check_usable()
         self._claim(client)
         await self.backend.start()
-        # The device starts the belt at its minimum speed; ramp from there.
-        self._commanded_units = self._min_units
+        self._sent("start")
+        # Real pads run up to their own start-speed setting, which may be above the cap. The
+        # next ramp begins from the speed the pad reports and pins it at once (see _ramp).
+        self._commanded_units = None
         self._target_units = None
+        self._pin_on_ramp = True
 
     async def set_speed(self, kmh: float, client: str | None = None) -> float:
         """Ramp towards `kmh` (clamped to cap and device range). Returns the effective target.
@@ -174,6 +201,7 @@ class SpeedController:
         await self._cancel_ramp()
         self._claim(client)
         await self.backend.stop()
+        self._sent("stop")
 
     async def client_disconnected(self, client: str) -> None:
         """Call when a client goes away. Stops the belt if that client was in control."""
@@ -188,9 +216,15 @@ class SpeedController:
         """Stop the belt if needed and disconnect."""
         await self._cancel_ramp()
         if self.backend.is_connected:
-            if self.backend.belt_state is not BeltState.STOPPED:
-                await self.backend.stop()
-            await self.backend.disconnect()
+            try:
+                if self.backend.belt_state is not BeltState.STOPPED:
+                    await self.backend.stop()
+                    self._sent("stop")
+            except BackendError:
+                log.critical("could not send stop while closing. STOP THE PAD MANUALLY.")
+                raise
+            finally:
+                await self.backend.disconnect()
 
     # --- internals --------------------------------------------------------------------------
 
@@ -224,20 +258,89 @@ class SpeedController:
             kind = SafetyEventKind.BELT_WITHIN_CAP
             message = f"belt back within the {cap:.1f} km/h cap"
             log.info(message)
-        event = SafetyEvent(kind, message, speed_kmh, cap)
+        self._emit(SafetyEvent(kind, message, speed_kmh, cap))
+
+    def _hold(self, sample: Sample) -> None:
+        controlled = self._controlling_client is not None and not self._connection_lost
+        if not controlled or sample.belt is not BeltState.RUNNING:
+            self._over_commanded = 0
+            self._above_cap_since = None
+            return
+        now = self.clock.now()
+        if not self._above_cap:
+            self._above_cap_since = None
+        elif self._above_cap_since is None:
+            self._above_cap_since = now
+        elif (
+            now - self._above_cap_since >= self.config.above_cap_stop_s
+            and self._failsafe_task is None
+        ):
+            message = (
+                f"belt still at {sample.speed_kmh:.1f} km/h, above the {self.max_speed_kmh:.1f} "
+                f"km/h cap, after {self.config.above_cap_stop_s:g} s under bridge control; stopping"
+            )
+            log.critical(message)
+            self._emit(SafetyEvent(SafetyEventKind.FAILSAFE_STOP, message, sample.speed_kmh,
+                                   self.max_speed_kmh))
+            self._failsafe_task = asyncio.get_running_loop().create_task(self._failsafe_stop())
+            return
+
+        ramping = self._ramp_task is not None and not self._ramp_task.done()
+        if ramping or self._commanded_units is None or self._target_units is None:
+            self._over_commanded = 0
+            return
+        commanded = self._kmh(self._commanded_units)
+        if sample.speed_kmh > commanded + self._res / 2:
+            self._over_commanded += 1
+        else:
+            self._over_commanded = 0
+        if self._over_commanded >= HOLD_SAMPLES:
+            log.warning("pad reports %.1f km/h, above the commanded %.1f; correcting",
+                        sample.speed_kmh, commanded)
+            self._over_commanded = 0
+            self._commanded_units = None  # ramp again from the actual speed
+            self._ramp_task = asyncio.get_running_loop().create_task(self._ramp())
+
+    async def _failsafe_stop(self) -> None:
+        try:
+            await self.stop()
+        except (BackendError, SafetyError) as exc:
+            log.critical("failsafe stop failed: %s. STOP THE PAD MANUALLY.", exc)
+        finally:
+            self._failsafe_task = None
+
+    def _emit(self, event: SafetyEvent) -> None:
         for callback in list(self._event_listeners):
             try:
                 callback(event)
             except Exception:
                 log.exception("safety event listener failed")
 
+    def _sent(self, name: str, kmh: float | None = None) -> None:
+        for callback in list(self._command_listeners):
+            try:
+                callback(name, kmh)
+            except Exception:
+                log.exception("command listener failed")
+
     async def _ramp(self) -> None:
         self._check_cap(self.backend.speed_kmh)
         if self._commanded_units is None:
-            # Belt was already running when we took over: ramp from its actual speed.
-            self._commanded_units = max(
-                self._min_units, round(self.backend.speed_kmh / self._res)
-            )
+            # Just started, or already running when we took over: ramp from its actual speed,
+            # clamped into [device min, cap]. Never command above the cap.
+            actual = round(self.backend.speed_kmh / self._res)
+            start = max(self._min_units, min(self._max_units, actual))
+            pin, self._pin_on_ramp = self._pin_on_ramp, False
+            if pin and self._target_units is not None:
+                # Pin one ramp step towards the target (from the actual speed) rather than the
+                # actual speed itself: on the owner's pad that avoids a down-then-up wobble.
+                diff = self._target_units - start
+                start += max(-self._max_step_units, min(self._max_step_units, diff))
+            self._commanded_units = start
+            if pin or actual > self._max_units:
+                # After our own start, or above the cap: command it now, not after a tick.
+                await self.backend.set_speed(self._kmh(start))
+                self._sent("set_speed", self._kmh(start))
         while self._target_units is not None and self._commanded_units != self._target_units:
             await self.clock.sleep(self.config.ramp_tick_s)
             if self._target_units is None:
@@ -247,10 +350,12 @@ class SpeedController:
             next_units = self._commanded_units + step
             await self.backend.set_speed(self._kmh(next_units))
             self._commanded_units = next_units
+            self._sent("set_speed", self._kmh(next_units))
 
     async def _cancel_ramp(self) -> None:
         self._target_units = None
         self._commanded_units = None
+        self._pin_on_ramp = False
         task, self._ramp_task = self._ramp_task, None
         if task is not None and not task.done():
             task.cancel()
@@ -276,6 +381,7 @@ class SpeedController:
                 await self.backend.connect()
                 # Belt state is stale after a drop, so always send stop.
                 await self.backend.stop()
+                self._sent("stop")
             except BackendError as exc:
                 log.error("reconnect attempt %d/%d failed: %s", attempt, attempts, exc)
                 if attempt < attempts:

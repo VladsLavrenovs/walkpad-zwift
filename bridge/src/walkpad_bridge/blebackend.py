@@ -1,6 +1,10 @@
 """Real pad over BLE. Picks the KingSmith or FTMS protocol from the services the pad offers.
 
-Read-only for now: `set_speed`, `start` and `stop` raise ControlNotSupportedError.
+Belt commands are for SpeedController only (it enforces cap and ramp). On top of that this
+backend refuses commands that make no sense for the last reported belt state:
+- `start` only when the pad reported a stopped belt (on some pads start is a toggle),
+- `set_speed` only while the pad reports the belt running, within the device range,
+- `stop` is always sent.
 """
 
 from __future__ import annotations
@@ -18,10 +22,6 @@ from .ftms import FtmsProtocol
 from .kingsmith import KingsmithProtocol
 
 log = logging.getLogger(__name__)
-
-
-class ControlNotSupportedError(BackendError):
-    """Belt control is not implemented for real devices yet."""
 
 
 class BleBackend(PadBackend):
@@ -123,15 +123,32 @@ class BleBackend(PadBackend):
             self._subscribers.discard(queue)
 
     async def set_speed(self, kmh: float) -> None:
-        raise ControlNotSupportedError("speed control is not implemented for real devices yet")
+        handler = self._require_handler()
+        rng = handler.speed_range
+        if not (rng.min_kmh <= kmh <= rng.max_kmh):
+            raise ValueError(f"{kmh} km/h outside device range {rng.min_kmh}-{rng.max_kmh}")
+        if self.belt_state is not BeltState.RUNNING:
+            raise BackendError(f"belt is not running (pad reports {self.belt_state})")
+        await handler.set_belt_speed(kmh)
 
     async def start(self) -> None:
-        raise ControlNotSupportedError("belt control is not implemented for real devices yet")
+        handler = self._require_handler()
+        if self._last is None:
+            raise BackendError("no status from the pad yet; refusing to start blind")
+        if self._last.belt is not BeltState.STOPPED or self._last.speed_kmh > 0:
+            # Start may toggle the belt on some pads, so never send it to a moving belt.
+            raise BackendError(f"belt is not stopped (pad reports {self._last.belt})")
+        await handler.start_belt()
 
     async def stop(self) -> None:
-        raise ControlNotSupportedError("belt control is not implemented for real devices yet")
+        await self._require_handler().stop_belt()
 
     # --- internals --------------------------------------------------------------------------
+
+    def _require_handler(self) -> ProtocolHandler:
+        if self._client is None or self.handler is None:
+            raise NotConnectedError("pad is not connected")
+        return self.handler
 
     def _make_handler(self, protocol: Protocol) -> ProtocolHandler:
         if protocol is Protocol.KINGSMITH:

@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import dataclasses
 import enum
 import logging
 import signal
 import sys
+import time
 from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Annotated
@@ -20,20 +22,22 @@ from .blebackend import BleBackend
 from .clock import Clock, MonotonicClock, ScaledClock
 from .config import Config, load_config
 from .fake import FakeBackend
-from .safety import SpeedController
+from .lag import LagMeter
+from .safety import SafetyConfig, SafetyError, SpeedController
 
 CLIENT = "cli"
 STOP_CONFIRM_TIMEOUT_S = 30.0
+STOP_RETRY_S = 3.0  # resend stop if the pad still reports the belt running this long after
+START_CONFIRM_TIMEOUT_S = 15.0
+FIRST_STATUS_TIMEOUT_S = 10.0
+DEFAULT_LOG_DIR = Path(__file__).resolve().parents[2] / "logs"
+
+log = logging.getLogger(__name__)
+sample_log = logging.getLogger("walkpad_bridge.samples")  # manual-test log file only
 
 app = typer.Typer(no_args_is_help=True, help="WalkPad bridge.")
 
 FakeOpt = Annotated[bool, typer.Option("--fake", help="Use the simulated pad.")]
-ControlFakeOpt = Annotated[
-    bool,
-    typer.Option(
-        "--fake", help="Use the simulated pad (required: real-device control is not implemented yet)."
-    ),
-]
 AddressArg = Annotated[
     str | None,
     typer.Argument(help="Pad BLE address (see `scan`). Default: [ble] address in config.toml."),
@@ -86,17 +90,31 @@ def _make_fake(fake_speed: float, time_scale: float) -> tuple[FakeBackend, Clock
     return FakeBackend(initial_speed_kmh=fake_speed, clock=clock), clock
 
 
-def _make_control_backend(
-    fake: bool, fake_speed: float, time_scale: float
-) -> tuple[PadBackend, Clock]:
-    if not fake:
+def _make_ble(address: str | None, protocol: ProtocolChoice | None, cfg: Config) -> BleBackend:
+    address = _resolve_address(address, cfg)
+    _hint(REMINDER)
+    typer.echo(f"Connecting to {address}...")
+    return BleBackend(
+        address,
+        protocol=_resolve_protocol(protocol, cfg),
+        connect_timeout_s=cfg.ble.connect_timeout_s,
+        kingsmith_poll_s=cfg.ble.kingsmith_poll_s,
+        connector=ble.connect_client,
+    )
+
+
+def _safety_config(cfg: Config, max_speed: float | None) -> SafetyConfig:
+    """`--max-speed` can only lower the configured cap; raising it means editing config.toml."""
+    if max_speed is None:
+        return cfg.safety
+    if not (0 < max_speed <= cfg.safety.max_speed_kmh):
         typer.echo(
-            "Belt control on the real pad is not implemented yet; use --fake. "
-            "`live ADDRESS` reads live data from the real pad.",
+            f"--max-speed must be above 0 and at most the configured cap "
+            f"({cfg.safety.max_speed_kmh} km/h in config.toml).",
             err=True,
         )
         raise typer.Exit(2)
-    return _make_fake(fake_speed, time_scale)
+    return dataclasses.replace(cfg.safety, max_speed_kmh=max_speed)
 
 
 def _resolve_address(address: str | None, cfg: Config) -> str:
@@ -128,31 +146,159 @@ async def _print_samples(
     backend: PadBackend,
     count: int | None = None,
     on_sample: Callable[[Sample], None] | None = None,
+    muted: asyncio.Event | None = None,
 ) -> None:
+    """Print samples; while `muted` is set they go to the log file only (e.g. during a prompt)."""
     async with contextlib.aclosing(backend.samples()) as samples:
         n = 0
         async for sample in samples:
             if on_sample is not None:
                 on_sample(sample)
-            typer.echo(format_sample(sample))
+            if muted is not None and muted.is_set():
+                sample_log.debug("%s", format_sample(sample))
+            else:
+                _echo_sample(sample)
             n += 1
             if count is not None and n >= count:
                 return
 
 
-async def _print_until_stopped(backend: PadBackend) -> None:
-    """Print samples until the pad reports the belt stopped (real-time timeout)."""
-    if not backend.is_connected or backend.belt_state is BeltState.STOPPED:
-        return
+async def _print_until_stopped(
+    backend: PadBackend,
+    controller: SpeedController | None = None,
+    on_sample: Callable[[Sample], None] | None = None,
+) -> bool:
+    """Print samples until the pad reports the belt stopped (real-time timeout).
+
+    With a controller, stop is sent again whenever the pad still reports the belt running
+    STOP_RETRY_S after the last stop (a dropped BLE write must not leave the belt running).
+    Returns True only once the pad reports it stopped.
+    """
+    if not backend.is_connected:
+        typer.echo("WARNING: not connected, cannot confirm the belt stopped. Check the pad!", err=True)
+        return False
+    if backend.belt_state is BeltState.STOPPED:
+        return True
+    loop = asyncio.get_running_loop()
+    last_stop = loop.time()
     try:
         async with asyncio.timeout(STOP_CONFIRM_TIMEOUT_S):
             async with contextlib.aclosing(backend.samples()) as samples:
                 async for sample in samples:
-                    typer.echo(format_sample(sample))
+                    if on_sample is not None:
+                        on_sample(sample)
+                    _echo_sample(sample)
                     if sample.belt is BeltState.STOPPED:
+                        return True
+                    if (
+                        controller is not None
+                        and sample.belt is BeltState.RUNNING
+                        and loop.time() - last_stop >= STOP_RETRY_S
+                    ):
+                        typer.echo("Pad still reports the belt running; sending stop again.", err=True)
+                        with contextlib.suppress(BackendError):
+                            await controller.stop()
+                        last_stop = loop.time()
+    except TimeoutError:
+        pass
+    typer.echo("WARNING: pad did not report the belt stopped. Check it!", err=True)
+    return False
+
+
+def _echo_sample(sample: Sample) -> None:
+    line = format_sample(sample)
+    typer.echo(line)
+    sample_log.debug("%s", line)
+
+
+async def _first_sample(backend: PadBackend) -> Sample | None:
+    """The pad's current status (waits for the first report after connecting)."""
+    try:
+        async with asyncio.timeout(FIRST_STATUS_TIMEOUT_S):
+            async with contextlib.aclosing(backend.samples()) as samples:
+                async for sample in samples:
+                    return sample
+    except TimeoutError:
+        pass
+    return None
+
+
+async def _wait_until_moving(backend: PadBackend) -> None:
+    """After start: wait until the belt actually moves (the pad counts down first)."""
+    try:
+        async with asyncio.timeout(START_CONFIRM_TIMEOUT_S):
+            async with contextlib.aclosing(backend.samples()) as samples:
+                async for sample in samples:
+                    if sample.belt is BeltState.RUNNING and sample.speed_kmh > 0:
+                        typer.echo(f"Belt moving at {sample.speed_kmh:.1f} km/h.")
                         return
     except TimeoutError:
-        typer.echo("WARNING: pad did not report the belt stopped. Check it!", err=True)
+        raise BackendError(
+            f"pad did not report the belt running within {START_CONFIRM_TIMEOUT_S:g} s"
+        ) from None
+    raise BackendError("connection lost while waiting for the belt to start")
+
+
+async def _until_belt_stops(backend: PadBackend) -> None:
+    """Returns when the pad reports the belt stopped or stopping."""
+    async with contextlib.aclosing(backend.samples()) as samples:
+        async for sample in samples:
+            if sample.belt is not BeltState.RUNNING:
+                return
+    await asyncio.Event().wait()  # connection lost: the connection-lost path handles that
+
+
+async def _read_line() -> str:
+    """Read a line from stdin without blocking the event loop (so Ctrl+C still works)."""
+    try:
+        fd = sys.stdin.fileno()
+    except (AttributeError, OSError, ValueError):
+        fd = None
+    if fd is None or sys.platform == "win32":
+        return sys.stdin.readline()  # test runners and Windows dev: blocking is fine there
+    loop = asyncio.get_running_loop()
+    future: asyncio.Future[str] = loop.create_future()
+
+    def ready() -> None:
+        if not future.done():
+            future.set_result(sys.stdin.readline())
+
+    loop.add_reader(fd, ready)
+    try:
+        return await future
+    finally:
+        loop.remove_reader(fd)
+
+
+@contextlib.contextmanager
+def _manual_test_logging(log_dir: Path, debug: bool) -> Iterator[Path]:
+    """Everything (commands, raw frames, samples, lag) to a file; INFO and up on the console."""
+    log_dir.mkdir(parents=True, exist_ok=True)
+    path = log_dir / f"manual-test-{time.strftime('%Y%m%d-%H%M%S')}.log"
+    file_handler = logging.FileHandler(path)
+    file_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s"))
+    console = list(logging.getLogger().handlers)
+    saved = [(h, h.level) for h in console]
+
+    def not_samples(record: logging.LogRecord) -> bool:
+        return record.name != sample_log.name  # samples are echoed already; file only
+
+    for handler in console:
+        handler.setLevel(logging.DEBUG if debug else logging.INFO)
+        handler.addFilter(not_samples)
+    bridge_logger = logging.getLogger("walkpad_bridge")
+    old_level = bridge_logger.level
+    bridge_logger.setLevel(logging.DEBUG)
+    bridge_logger.addHandler(file_handler)
+    try:
+        yield path
+    finally:
+        bridge_logger.removeHandler(file_handler)
+        bridge_logger.setLevel(old_level)
+        file_handler.close()
+        for handler, level in saved:
+            handler.setLevel(level)
+            handler.removeFilter(not_samples)
 
 
 def _shutdown_signals() -> list[signal.Signals]:
@@ -287,16 +433,7 @@ def live(
     if fake:
         backend, _ = _make_fake(fake_speed, time_scale)
     else:
-        address = _resolve_address(address, cfg)
-        _hint(REMINDER)
-        typer.echo(f"Connecting to {address}...")
-        backend = BleBackend(
-            address,
-            protocol=_resolve_protocol(protocol, cfg),
-            connect_timeout_s=cfg.ble.connect_timeout_s,
-            kingsmith_poll_s=cfg.ble.kingsmith_poll_s,
-            connector=ble.connect_client,
-        )
+        backend = _make_ble(address, protocol, cfg)
 
     async def run() -> bool:
         """True if the sample stream ended because the connection dropped."""
@@ -324,13 +461,28 @@ def live(
 @app.command()
 def speed(
     kmh: Annotated[float, typer.Argument(help="Target speed in km/h (clamped to the safety cap).")],
-    fake: ControlFakeOpt = False,
+    address: AddressArg = None,
+    fake: FakeOpt = False,
+    manual_test: Annotated[
+        bool,
+        typer.Option(
+            "--manual-test",
+            help="Manual hardware test: show the plan, ask before the first command, log to "
+            "bridge/logs/. Required for the real pad.",
+        ),
+    ] = False,
+    max_speed: Annotated[
+        float | None,
+        typer.Option(help="Lower the speed cap for this run (km/h). Cannot exceed config.toml."),
+    ] = None,
     hold: Annotated[
         float | None,
         typer.Option(help="Seconds to keep walking after reaching the target (default: until Ctrl+C)."),
     ] = None,
+    protocol: ProtocolOpt = None,
     fake_speed: FakeSpeedOpt = 0.0,
     config: ConfigOpt = None,
+    log_dir: Annotated[Path, typer.Option(hidden=True)] = DEFAULT_LOG_DIR,
     time_scale: TimeScaleOpt = 1.0,
 ) -> None:
     """Start the belt if needed and ramp to KMH. The belt stops when this command exits.
@@ -339,11 +491,92 @@ def speed(
     wait until the pad reports it stopped, and exit 0.
     """
     cfg = load_config(config)
-    backend, clock = _make_control_backend(fake, fake_speed, time_scale)
+    safety = _safety_config(cfg, max_speed)
+    if not fake and not manual_test:
+        typer.echo(
+            "Belt control on the real pad needs --manual-test for now "
+            "(see the manual test plan in bridge/README.md).",
+            err=True,
+        )
+        raise typer.Exit(2)
+    backend: PadBackend
+    if fake:
+        backend, clock = _make_fake(fake_speed, time_scale)
+    else:
+        backend, clock = _make_ble(address, protocol, cfg), MonotonicClock()
+    debug = logging.getLogger("walkpad_bridge").level == logging.DEBUG  # global --debug
+
+    with contextlib.ExitStack() as stack:
+        if manual_test:
+            log_path = stack.enter_context(_manual_test_logging(log_dir, debug))
+            typer.echo(f"Logging this test to {log_path}")
+        try:
+            asyncio.run(_speed_session(backend, clock, safety, kmh, hold, manual_test))
+        except (BackendError, SafetyError, ValueError) as exc:
+            typer.echo(f"Error: {exc}", err=True)
+            raise typer.Exit(1) from exc
+
+
+async def _confirm_manual_test(
+    backend: PadBackend, controller: SpeedController, kmh: float, muted: asyncio.Event
+) -> bool:
+    status = await _first_sample(backend)
+    if status is None:
+        raise BackendError("no status from the pad; not sending anything")
+    if status.belt is not BeltState.STOPPED:
+        raise SafetyError(f"belt is {status.belt}; stop it first, then start the manual test")
+    cfg = controller.config
+    protocol = getattr(backend, "protocol", "fake")
+    typer.echo("")
+    typer.echo(typer.style("MANUAL HARDWARE TEST", bold=True))
+    typer.echo(f"  pad:      {getattr(backend, 'address', 'simulated')} ({protocol})")
+    typer.echo(f"  belt now: {format_sample(status)}")
+    typer.echo(
+        f"  plan:     start the belt (it starts at the pad's own start speed), then ramp to "
+        f"{controller.clamp(kmh):.1f} km/h"
+    )
+    typer.echo(
+        f"  limits:   cap {controller.max_speed_kmh:.1f} km/h, ramp "
+        f"{cfg.max_ramp_kmh_per_s:g} km/h per s"
+    )
+    typer.echo("  stop:     Ctrl+C here, the pad's remote, or the power switch")
+    typer.echo("Send the first command? Type 'yes' to go: ", nl=False)
+    muted.set()  # keep live samples from printing over the prompt
+    try:
+        answer = (await _read_line()).strip().lower()
+    finally:
+        muted.clear()
+    return answer == "yes"
+
+
+async def _speed_session(
+    backend: PadBackend,
+    clock: Clock,
+    safety: SafetyConfig,
+    kmh: float,
+    hold: float | None,
+    manual_test: bool,
+) -> None:
+    shutdown = asyncio.Event()
+    muted = asyncio.Event()
+    sent: list[str] = []
+
+    def on_signal(sig: signal.Signals) -> None:
+        if not shutdown.is_set():
+            typer.echo(f"Received {sig.name}; stopping the belt.")
+        shutdown.set()
+
+    def on_connection_lost() -> None:
+        typer.echo("Connection to the pad lost; reconnecting to stop the belt.", err=True)
+        shutdown.set()
 
     async def walk(controller: SpeedController) -> None:
+        if manual_test and not await _confirm_manual_test(backend, controller, kmh, muted):
+            typer.echo("Aborted. Nothing was sent to the pad.")
+            return
         if backend.belt_state is not BeltState.RUNNING:
             await controller.start(client=CLIENT)
+            await _wait_until_moving(backend)  # the ramp then starts from the actual speed
         target = await controller.set_speed(kmh, client=CLIENT)
         if target != kmh:
             typer.echo(f"Requested {kmh} km/h, clamped to {target} km/h by safety limits.")
@@ -351,63 +584,104 @@ def speed(
         typer.echo(f"Reached {target} km/h.")
         if hold is None:
             typer.echo("Walking. Press Ctrl+C to stop the belt.")
-            await asyncio.Event().wait()
-        else:
-            await clock.sleep(hold)
+        holding = asyncio.create_task(clock.sleep(hold) if hold is not None else asyncio.Event().wait())
+        stopped_elsewhere = asyncio.create_task(_until_belt_stops(backend))
+        try:
+            await asyncio.wait({holding, stopped_elsewhere}, return_when=asyncio.FIRST_COMPLETED)
+        finally:
+            holding.cancel()
+            stopped_elsewhere.cancel()
+        if stopped_elsewhere.done() and not stopped_elsewhere.cancelled():
+            typer.echo("The pad reports the belt stopped (remote or pad button?). Ending the session.")
 
-    async def run() -> None:
-        shutdown = asyncio.Event()
+    with _signal_handlers(on_signal):
+        await backend.connect()
+        try:
+            controller = SpeedController(backend, safety, clock)
+        except ValueError:
+            await backend.disconnect()  # e.g. --max-speed below the pad's minimum
+            raise
+        lag = LagMeter(clock, backend.speed_range.resolution_kmh)
+        controller.add_command_listener(lag.on_command)
+        controller.add_command_listener(lambda name, _kmh: sent.append(name))
+        backend.add_connection_lost_listener(on_connection_lost)
 
-        def on_signal(sig: signal.Signals) -> None:
-            if not shutdown.is_set():
-                typer.echo(f"Received {sig.name}; stopping the belt.")
-            shutdown.set()
+        def on_sample(sample: Sample) -> None:
+            controller.observe(sample)
+            lag.observe(sample)
 
-        with _signal_handlers(on_signal):
-            await backend.connect()
-            controller = SpeedController(backend, cfg.safety, clock)
-            printer = asyncio.create_task(_print_samples(backend, on_sample=controller.observe))
+        printer = asyncio.create_task(_print_samples(backend, on_sample=on_sample, muted=muted))
+        try:
+            walking = asyncio.create_task(walk(controller))
+            signalled = asyncio.create_task(shutdown.wait())
             try:
-                walking = asyncio.create_task(walk(controller))
-                signalled = asyncio.create_task(shutdown.wait())
-                try:
-                    await asyncio.wait({walking, signalled}, return_when=asyncio.FIRST_COMPLETED)
-                finally:
-                    signalled.cancel()
-                    walking.cancel()
-                    with contextlib.suppress(asyncio.CancelledError):
-                        await walking  # re-raises a real error from walk()
+                await asyncio.wait({walking, signalled}, return_when=asyncio.FIRST_COMPLETED)
             finally:
-                # Controlling client going away must stop the belt. Signal handlers stay
-                # installed meanwhile, so a second Ctrl+C cannot interrupt the stop.
-                printer.cancel()
+                signalled.cancel()
+                walking.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await walking  # re-raises a real error from walk()
+        finally:
+            # Controlling client going away must stop the belt. Signal handlers stay
+            # installed meanwhile, so a second Ctrl+C cannot interrupt the stop.
+            printer.cancel()
+            try:
                 await controller.client_disconnected(CLIENT)
-                await _print_until_stopped(backend)
-                await controller.close()
+            except BackendError as exc:
+                typer.echo(f"ERROR sending stop: {exc}", err=True)
+            if controller.recovery_task is not None:
+                await controller.recovery_task  # reconnect + stop after a dropped link
+            stopped = await _print_until_stopped(backend, controller, on_sample)
+            await controller.close()
+            _report_lag(lag, echo=manual_test)
+            if not sent:
+                typer.echo("Disconnected.")
+            elif stopped:
                 typer.echo("Belt stopped.")
+            else:
+                typer.echo("WARNING: could not confirm the belt stopped. CHECK THE PAD.", err=True)
 
-    asyncio.run(run())
+
+def _report_lag(lag: LagMeter, echo: bool) -> None:
+    lines = lag.summary()
+    if lines and echo:
+        typer.echo("Belt response lag (resolution: one status report):")
+    for line in lines:
+        if echo:
+            typer.echo(f"  {line}")
+        log.info("lag summary: %s", line)
 
 
 @app.command()
 def stop(
-    fake: ControlFakeOpt = False,
+    address: AddressArg = None,
+    fake: FakeOpt = False,
+    protocol: ProtocolOpt = None,
     fake_speed: FakeSpeedOpt = 3.0,
     config: ConfigOpt = None,
     time_scale: TimeScaleOpt = 1.0,
 ) -> None:
-    """Stop the belt and wait until it has stopped."""
+    """Stop the belt and wait until it has stopped. Never asks: stopping is always allowed."""
     cfg = load_config(config)
-    backend, clock = _make_control_backend(fake, fake_speed, time_scale)
+    backend: PadBackend
+    if fake:
+        backend, clock = _make_fake(fake_speed, time_scale)
+    else:
+        backend, clock = _make_ble(address, protocol, cfg), MonotonicClock()
 
     async def run() -> None:
         await backend.connect()
         controller = SpeedController(backend, cfg.safety, clock)
         try:
+            await _first_sample(backend)  # know the belt state, so we can tell when it stopped
             await controller.stop(client=CLIENT)
-            await _print_until_stopped(backend)
-            typer.echo("Belt stopped.")
+            if await _print_until_stopped(backend, controller):
+                typer.echo("Belt stopped.")
         finally:
             await controller.close()
 
-    asyncio.run(run())
+    try:
+        asyncio.run(run())
+    except BackendError as exc:
+        typer.echo(f"Error: {exc}", err=True)
+        raise typer.Exit(1) from exc

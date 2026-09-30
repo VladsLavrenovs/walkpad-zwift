@@ -27,7 +27,7 @@ FTMS_SERVICE = uuid16("1826")
 FTMS_FEATURE_CHAR = uuid16("2acc")
 FTMS_TREADMILL_DATA_CHAR = uuid16("2acd")
 FTMS_SPEED_RANGE_CHAR = uuid16("2ad4")
-FTMS_CONTROL_POINT_CHAR = uuid16("2ad9")  # never written: real-device control is not implemented
+FTMS_CONTROL_POINT_CHAR = uuid16("2ad9")  # written only for belt control (never by `live`)
 
 LIKELY_NAME = re.compile(r"walkingpad|kingsmith|^ks[-_]", re.IGNORECASE)
 
@@ -242,7 +242,10 @@ def format_value(value: bytes) -> str:
 
 
 class ProtocolHandler(ABC):
-    """Speaks one pad protocol over an already connected GATT client. Read-only for now."""
+    """Speaks one pad protocol over an already connected GATT client.
+
+    Belt commands are called only by BleBackend, which is called only by SpeedController.
+    """
 
     protocol: Protocol
     speed_range: SpeedRange
@@ -254,3 +257,12 @@ class ProtocolHandler(ABC):
     @abstractmethod
     async def stop(self) -> None:
         """Cancel background work. Must not write to the device."""
+
+    @abstractmethod
+    async def start_belt(self) -> None: ...
+
+    @abstractmethod
+    async def stop_belt(self) -> None: ...
+
+    @abstractmethod
+    async def set_belt_speed(self, kmh: float) -> None: ...

@@ -1,19 +1,23 @@
-"""Bluetooth Fitness Machine Service (FTMS, 0x1826) treadmill support (read-only).
+"""Bluetooth Fitness Machine Service (FTMS, 0x1826) treadmill support.
 
-Live data arrives as Treadmill Data (0x2ACD) notifications. Nothing is ever written: the
-Control Point (0x2AD9) is needed only for speed control, which is not implemented for real
-devices yet. FTMS has no step count, so samples carry `steps=None`.
+Live data arrives as Treadmill Data (0x2ACD) notifications; `live` never writes anything.
+Belt commands go to the Control Point (0x2AD9): request control once, then start / stop /
+set target speed, each confirmed by an indication `80 <opcode> <result>`. Implemented from the
+spec and tested against a fake client only (the owner's pad is KingSmith-only).
+FTMS has no step count, so samples carry `steps=None`.
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import struct
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from .backend import BeltState, Sample, SpeedRange
+from .backend import BackendError, BeltState, Sample, SpeedRange
 from .ble import (
+    FTMS_CONTROL_POINT_CHAR,
     FTMS_SPEED_RANGE_CHAR,
     FTMS_TREADMILL_DATA_CHAR,
     GattClient,
@@ -25,6 +29,22 @@ from .clock import Clock, MonotonicClock
 log = logging.getLogger(__name__)
 
 DEFAULT_SPEED_RANGE = SpeedRange(min_kmh=0.5, max_kmh=6.0, resolution_kmh=0.1)
+
+# Control Point opcodes and result codes (FTMS spec 4.16).
+OP_REQUEST_CONTROL = 0x00
+OP_SET_TARGET_SPEED = 0x02
+OP_START_RESUME = 0x07
+OP_STOP_PAUSE = 0x08
+STOP_PAUSE_STOP = 0x01
+OP_RESPONSE = 0x80
+RESULT_SUCCESS = 0x01
+RESULT_NAMES = {
+    0x02: "op code not supported",
+    0x03: "invalid parameter",
+    0x04: "operation failed",
+    0x05: "control not permitted",
+}
+CONTROL_TIMEOUT_S = 3.0
 
 # Treadmill Data flags (FTMS spec 4.9.1). Bit 0 is inverted: 0 means speed IS present.
 MORE_DATA = 1 << 0
@@ -173,9 +193,15 @@ class FtmsProtocol(ProtocolHandler):
         self.speed_range = DEFAULT_SPEED_RANGE
         self._session = FtmsSession(self.clock)
         self._publish: Callable[[Sample], None] | None = None
+        self._client: GattClient | None = None
+        self._control_lock = asyncio.Lock()
+        self._indications_on = False
+        self._has_control = False
+        self._pending: tuple[int, asyncio.Future[int]] | None = None
 
     async def start(self, client: GattClient, publish: Callable[[Sample], None]) -> None:
         self._publish = publish
+        self._client = client
         try:
             self.speed_range = parse_speed_range(
                 bytes(await client.read_gatt_char(FTMS_SPEED_RANGE_CHAR))
@@ -186,6 +212,63 @@ class FtmsProtocol(ProtocolHandler):
 
     async def stop(self) -> None:
         self._publish = None
+        if self._pending is not None and not self._pending[1].done():
+            self._pending[1].cancel()
+
+    async def start_belt(self) -> None:
+        await self._control(OP_START_RESUME)
+
+    async def stop_belt(self) -> None:
+        await self._control(OP_STOP_PAUSE, bytes([STOP_PAUSE_STOP]))
+
+    async def set_belt_speed(self, kmh: float) -> None:
+        await self._control(OP_SET_TARGET_SPEED, struct.pack("<H", round(kmh * 100)))
+
+    async def _control(self, opcode: int, params: bytes = b"") -> None:
+        client = self._client
+        if client is None:
+            raise BackendError("FTMS handler is not started")
+        async with self._control_lock:
+            if not self._indications_on:
+                # Enabling indications writes only the CCCD, and only once control is wanted.
+                await client.start_notify(FTMS_CONTROL_POINT_CHAR, self._on_control_response)
+                self._indications_on = True
+            if not self._has_control:
+                await self._write_control(client, OP_REQUEST_CONTROL, b"")
+                self._has_control = True
+            await self._write_control(client, opcode, params)
+
+    async def _write_control(self, client: GattClient, opcode: int, params: bytes) -> None:
+        future: asyncio.Future[int] = asyncio.get_running_loop().create_future()
+        self._pending = (opcode, future)
+        frame = bytes([opcode, *params])
+        log.info("FTMS tx %s", frame.hex(" "))
+        try:
+            await client.write_gatt_char(FTMS_CONTROL_POINT_CHAR, frame, response=True)
+            async with asyncio.timeout(CONTROL_TIMEOUT_S):
+                result = await future
+        except TimeoutError as exc:
+            raise BackendError(f"FTMS op 0x{opcode:02x}: no response from the pad") from exc
+        except BackendError:
+            raise
+        except Exception as exc:
+            raise BackendError(f"FTMS op 0x{opcode:02x} write failed: {exc}") from exc
+        finally:
+            self._pending = None
+        if result != RESULT_SUCCESS:
+            if result == 0x05:
+                self._has_control = False  # ask again next time
+            name = RESULT_NAMES.get(result, f"result 0x{result:02x}")
+            raise BackendError(f"FTMS op 0x{opcode:02x} refused: {name}")
+
+    def _on_control_response(self, _char: object, data: bytearray) -> None:
+        raw = bytes(data)
+        log.debug("FTMS cp rx %s", raw.hex(" "))
+        if len(raw) < 3 or raw[0] != OP_RESPONSE or self._pending is None:
+            return
+        opcode, future = self._pending
+        if raw[1] == opcode and not future.done():
+            future.set_result(raw[2])
 
     def _on_notify(self, _char: object, data: bytearray) -> None:
         raw = bytes(data)

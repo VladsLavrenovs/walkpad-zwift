@@ -16,6 +16,7 @@ dist/
 *.sqlite
 *.sqlite3
 *.db
+bridge/logs/
 
 # Node / Vite
 node_modules/

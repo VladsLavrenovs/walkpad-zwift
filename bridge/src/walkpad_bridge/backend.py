@@ -1,4 +1,4 @@
-"""Pad backend interface shared by the FAKE backend and (later) the real BLE backends."""
+"""Pad backend interface shared by the FAKE backend and the real BLE backend."""
 
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ class Sample:
 
     speed_kmh: float
     distance_m: float
-    steps: int
+    steps: int | None  # None when the protocol has no step count (FTMS)
     elapsed_s: float
     belt: BeltState
 

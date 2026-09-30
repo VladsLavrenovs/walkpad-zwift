@@ -9,3 +9,13 @@ ramp_tick_s = 1.0
 # If the pad connection drops, reconnect (up to this many tries) and stop the belt.
 reconnect_attempts = 3
 reconnect_backoff_s = 1.0
+
+[ble]
+# Default pad address for `live`/`inspect` (find it with `walkpad-bridge scan`). Empty: pass it on the CLI.
+address = "57:4C:4E:36:10:BB"
+# auto picks from the services the pad offers (FTMS preferred); or force "kingsmith" / "ftms".
+protocol = "auto"
+scan_timeout_s = 8.0
+connect_timeout_s = 20.0
+# KingSmith pads only report status when asked; this is how often we ask (min 0.5).
+kingsmith_poll_s = 1.0

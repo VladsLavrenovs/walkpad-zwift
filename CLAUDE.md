@@ -66,7 +66,7 @@ Cloudflare Access allowing only the owner's email.
 - Config in one place per component (`bridge/config.toml`, `web/.env`).
 - Update the README section of the component you touched.
 
-## Unknowns
-- Exact WalkingPad model is not yet confirmed. Older models use KingSmith's proprietary BLE protocol
-  (see the open-source `ph4-walkingpad` project); some newer ones speak standard FTMS (0x1826).
-  The bridge must detect which one it's talking to.
+## Hardware
+- The owner's pad speaks KingSmith's proprietary BLE protocol only (service 0xFE00, no FTMS),
+  firmware `M30_V187.2.0`; live data verified on 2026-09-30 (see `bridge/README.md`). The exact
+  model name is still unconfirmed. The bridge auto-detects KingSmith vs FTMS (0x1826) anyway.

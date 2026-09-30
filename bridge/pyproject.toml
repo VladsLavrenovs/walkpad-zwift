@@ -1,0 +1,22 @@
+[project]
+name = "walkpad-bridge"
+version = "0.1.0"
+description = "BLE bridge for a KingSmith WalkingPad: live data, safe belt control, session storage."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = []
+
+[project.scripts]
+walkpad-bridge = "walkpad_bridge:main"
+
+[build-system]
+requires = ["uv_build>=0.12.21,<0.13.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

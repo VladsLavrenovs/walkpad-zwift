@@ -1,0 +1,31 @@
+# Secrets: never commit. Only .env.example files are tracked.
+.env
+.env.*
+!.env.example
+
+# Python / uv
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+*.egg-info/
+build/
+dist/
+
+# Bridge runtime data
+*.sqlite
+*.sqlite3
+*.db
+
+# Node / Vite
+node_modules/
+web/dist/
+*.local
+*.log
+
+# Editors / OS
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+Thumbs.db

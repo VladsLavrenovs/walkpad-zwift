@@ -16,12 +16,14 @@ import contextlib
 import logging
 import math
 from collections.abc import AsyncIterator
+from pathlib import Path
 from typing import Annotated, Any
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.types import Receive, Scope, Send
 from pydantic import BaseModel, Field
 from starlette.websockets import WebSocketDisconnect
 
@@ -181,16 +183,29 @@ def create_app(service: BridgeService, config: Config) -> FastAPI:
     # --- the web app ---------------------------------------------------------------------------
 
     web_dist = config.server.web_dist_path()
-    if (web_dist / "index.html").is_file():
-        app.mount("/", StaticFiles(directory=web_dist, html=True), name="web")
-    else:
-        log.warning("web app not built (%s missing); serving a placeholder at /", web_dist)
-
-        @app.get("/", response_class=HTMLResponse)
-        async def placeholder() -> str:
-            return NO_WEB_APP
+    if not (web_dist / "index.html").is_file():
+        log.warning("web app not built (%s missing); serving a placeholder at / until it is", web_dist)
+    app.mount("/", WebApp(web_dist), name="web")
 
     return app
+
+
+class WebApp:
+    """Serves the built web app, deciding per request: a build made after the bridge started
+    (or deleted since) is picked up without a restart. Placeholder page while there is none."""
+
+    def __init__(self, directory: Path) -> None:
+        self.directory = directory
+        self._static: StaticFiles | None = None
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if not (self.directory / "index.html").is_file():
+            self._static = None
+            await HTMLResponse(NO_WEB_APP)(scope, receive, send)
+            return
+        if self._static is None:
+            self._static = StaticFiles(directory=self.directory, html=True)
+        await self._static(scope, receive, send)
 
 
 async def _forward(queue: asyncio.Queue[dict[str, Any]], websocket: WebSocket) -> None:

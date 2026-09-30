@@ -117,8 +117,11 @@ CRITICAL (`STOP THE PAD MANUALLY`).
   commands (`live`, `speed`, `stop`) cannot reach the pad. Stop the service first:
   `systemctl --user stop walkpad-bridge` (it stops the belt if it is running), and
   `systemctl --user start walkpad-bridge` afterwards.
-- **Update:** `git pull && (cd bridge && uv sync) && systemctl --user restart walkpad-bridge`.
-  If the unit file changed: copy it again and `systemctl --user daemon-reload` first.
+- **Update:** `make update` from the repo root (`scripts/update.sh`): `git pull --ff-only`,
+  `uv sync --locked`, `npm ci`, `npm run build`, then restarts the service only if bridge code,
+  config or the unit file changed (it copies a changed unit and runs `daemon-reload` itself).
+  It **refuses to restart while the belt is running** (exit code 2; run it again after the walk).
+  A new web build needs no restart. `./scripts/update.sh --restart` forces a restart.
 - **Data:** `bridge/data/walkpad.sqlite` (git-ignored). Back it up with
   `sqlite3 bridge/data/walkpad.sqlite ".backup walkpad-backup.sqlite"` (safe while running).
 - **Stop behaviour:** stopping or restarting the service stops the belt. If the controlling page

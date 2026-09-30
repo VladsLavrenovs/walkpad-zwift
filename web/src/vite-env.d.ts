@@ -1,7 +1,7 @@
 /// <reference types="vite/client" />
 
 interface ImportMetaEnv {
-  /** Bridge base URL, e.g. http://localhost:8000 */
+  /** Bridge base URL, e.g. https://walkpad-bridge.connectedovals.com. Empty = same origin. */
   readonly VITE_BRIDGE_URL?: string
   /** "flat" (default, no Google requests) or "real" (Google Photorealistic 3D Tiles) */
   readonly VITE_WORLD_MODE?: 'flat' | 'real'

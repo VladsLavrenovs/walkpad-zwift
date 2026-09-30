@@ -3,7 +3,7 @@
 Personal, Zwift-inspired app for a KingSmith WalkingPad: live treadmill data over BLE, safe belt
 control, session history and stats, and a "walk across the world" view in CesiumJS.
 
-Status: bridge done as a service (real pad over BLE, sessions, stats, live WebSocket, LAN-only control); no UI yet. See [CLAUDE.md](CLAUDE.md) for the full brief and rules.
+Status: bridge runs as a service (real pad over BLE, sessions, stats, live WebSocket, LAN-only control) and serves the web app (placeholder world, walker, HUD, controls, stats page, OBS view) at `http://<laptop>:8080`. No Google 3D tiles yet. See [CLAUDE.md](CLAUDE.md) for the full brief and rules.
 
 ## Architecture
 
@@ -38,6 +38,16 @@ cd web && npm install && npm run dev
 ```
 
 Secrets go in `bridge/.env` and `web/.env` (git-ignored); copy from the `.env.example` next to each.
+
+## Updating the bridge laptop
+
+```sh
+make update     # git pull, bridge + web deps, build the web app, restart the service if needed
+```
+
+See [scripts/update.sh](scripts/update.sh): it never restarts the bridge while the belt is
+running, and a web-only change needs no restart at all. Needs `uv` (bridge/README.md) and Node
+via fnm (web/README.md).
 
 ## CI
 

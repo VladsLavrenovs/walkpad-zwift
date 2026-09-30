@@ -145,3 +145,13 @@ def test_serves_the_built_web_app(tmp_path: Path) -> None:
         assert c.get("/").text == "<h1>WalkPad</h1>"
         assert c.get("/assets/app.js").text == "console.log(1)"
         assert c.get("/status").json()["type"] == "status"  # API routes still win
+
+
+def test_web_app_built_after_start_is_served_without_restart(tmp_path: Path) -> None:
+    dist = tmp_path / "dist"
+    with make_client(tmp_path, web_dist=dist) as c:
+        assert "web app is not built" in c.get("/").text
+        dist.mkdir()
+        (dist / "index.html").write_text("<h1>WalkPad</h1>")
+        assert c.get("/").text == "<h1>WalkPad</h1>"
+        assert c.get("/sessions").status_code == 200

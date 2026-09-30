@@ -1,9 +1,7 @@
 import './style.css'
+import { App } from './app'
+import { loadConfig } from './config'
 
-const app = document.querySelector<HTMLDivElement>('#app')
-if (!app) throw new Error('#app element missing')
-
-app.innerHTML = `
-  <h1>WalkPad</h1>
-  <p>Scaffold only. World mode: <code>${import.meta.env.VITE_WORLD_MODE ?? 'flat'}</code></p>
-`
+const root = document.querySelector<HTMLDivElement>('#app')
+if (!root) throw new Error('#app element missing')
+new App(root, loadConfig(import.meta.env, window.location.search))

@@ -93,7 +93,7 @@ real pad. Stopping the service (Ctrl+C, SIGTERM) stops the belt and closes the o
 
 | Endpoint | Who | What |
 |---|---|---|
-| `GET /` | anyone | the built web app (`web/dist`), or a placeholder page if not built |
+| `GET /` | anyone | the built web app (`web/dist`), or a placeholder page if not built. Checked per request: a new build is live without restarting the bridge |
 | `GET /status` | anyone | connection, belt, speed, cap, target, controlling client, session id, `control_allowed` for the caller |
 | `GET /sessions?limit&offset` | anyone | sessions, newest first, with totals and `avg_speed_kmh` |
 | `GET /sessions/{id}` | anyone | one session with its per-second samples |

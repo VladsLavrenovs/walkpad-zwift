@@ -1,0 +1,227 @@
+/** Talks to the WalkPad bridge: the /live WebSocket (auto-reconnecting) and the HTTP API. */
+
+import { bridgeWsUrl } from './config'
+
+export type Belt = 'stopped' | 'running' | 'stopping'
+
+export interface SampleMsg {
+  type: 'sample'
+  t: number
+  speed_kmh: number
+  distance_m: number
+  steps: number | null
+  elapsed_s: number
+  belt: Belt
+  session_id: number | null
+}
+
+export interface StatusMsg {
+  type: 'status'
+  connected: boolean
+  protocol: string | null
+  belt: Belt | null
+  speed_kmh: number | null
+  cap_kmh: number
+  target_kmh: number | null
+  controlling_client: string | null
+  session_id: number | null
+  error: string | null
+  /** Only on GET /status: whether this page may control the belt. */
+  control_allowed?: boolean
+  /** Only on control responses: the target after the cap. */
+  applied_target_kmh?: number
+}
+
+export interface SafetyMsg {
+  type: 'safety'
+  kind: 'belt_above_cap' | 'belt_within_cap' | 'failsafe_stop'
+  message: string
+  speed_kmh: number
+  cap_kmh: number
+}
+
+export type BridgeMsg = SampleMsg | StatusMsg | SafetyMsg
+
+/** 'connecting' until the socket opens; 'offline' while retrying. */
+export type LinkState = 'connecting' | 'live' | 'offline'
+
+export interface Session {
+  id: number
+  started_at: number
+  ended_at: number | null
+  duration_s: number
+  distance_m: number
+  steps: number | null
+  max_speed_kmh: number
+  avg_speed_kmh: number
+  protocol: string | null
+}
+
+export interface PeriodTotals {
+  sessions: number
+  distance_m: number
+  duration_s: number
+  steps: number
+}
+
+export interface Best {
+  session_id?: number
+  value: number
+  date: string
+}
+
+export interface Stats {
+  today: string
+  daily: (PeriodTotals & { date: string })[]
+  weekly: (PeriodTotals & { week_start: string })[]
+  monthly: (PeriodTotals & { month: string })[]
+  streaks: { current_days: number; longest_days: number; walked_today: boolean; active_day_min_s: number }
+  personal_bests: {
+    longest_distance_m: Best | null
+    longest_duration_s: Best | null
+    most_steps: Best | null
+    fastest_avg_speed_kmh: Best | null
+    best_day_distance_m: Best | null
+  }
+  all_time: PeriodTotals
+}
+
+export class ControlError extends Error {
+  readonly status: number
+
+  constructor(message: string, status: number) {
+    super(message)
+    this.status = status
+  }
+}
+
+const CLIENT_ID_KEY = 'walkpad.clientId'
+
+/** One id per browser, kept across reloads: a page refresh is "the same client coming back"
+ * within the bridge's grace period, so the belt keeps running. */
+export function clientId(storage: Pick<Storage, 'getItem' | 'setItem'> | null): string {
+  let id = null
+  try {
+    id = storage?.getItem(CLIENT_ID_KEY) ?? null
+  } catch {
+    /* storage blocked: a fresh id per load still works, just without refresh grace */
+  }
+  if (!id || !/^[A-Za-z0-9_.-]{1,64}$/.test(id)) {
+    id = `web-${Math.random().toString(36).slice(2, 12)}`
+    try {
+      storage?.setItem(CLIENT_ID_KEY, id)
+    } catch {
+      /* ignore */
+    }
+  }
+  return id
+}
+
+export interface BridgeHandlers {
+  onMessage(msg: BridgeMsg): void
+  onLink(state: LinkState): void
+}
+
+export class BridgeClient {
+  private ws: WebSocket | null = null
+  private retryMs = 1000
+  private retryTimer: ReturnType<typeof setTimeout> | null = null
+  private closed = false
+  readonly baseUrl: string
+  /** null: connect anonymously (view-only pages such as OBS). */
+  readonly client: string | null
+  private readonly handlers: BridgeHandlers
+  private readonly origin: string
+
+  constructor(baseUrl: string, client: string | null, handlers: BridgeHandlers, origin = window.location.origin) {
+    this.baseUrl = baseUrl
+    this.client = client
+    this.handlers = handlers
+    this.origin = origin
+  }
+
+  connect(): void {
+    this.closed = false
+    this.handlers.onLink('connecting')
+    const query = this.client ? `?client=${encodeURIComponent(this.client)}` : ''
+    const ws = new WebSocket(bridgeWsUrl(this.baseUrl, `/live${query}`, this.origin))
+    this.ws = ws
+    ws.onopen = () => {
+      this.retryMs = 1000
+      this.handlers.onLink('live')
+    }
+    ws.onmessage = (event) => {
+      try {
+        this.handlers.onMessage(JSON.parse(event.data as string) as BridgeMsg)
+      } catch (err) {
+        console.warn('bad message from bridge', err)
+      }
+    }
+    ws.onclose = () => {
+      if (this.ws !== ws) return
+      this.ws = null
+      if (this.closed) return
+      this.handlers.onLink('offline')
+      this.retryTimer = setTimeout(() => this.connect(), this.retryMs)
+      this.retryMs = Math.min(this.retryMs * 2, 5000)
+    }
+  }
+
+  close(): void {
+    this.closed = true
+    if (this.retryTimer) clearTimeout(this.retryTimer)
+    this.ws?.close()
+    this.ws = null
+  }
+
+  // --- HTTP ------------------------------------------------------------------------------
+
+  private url(path: string): string {
+    return `${this.baseUrl}${path}`
+  }
+
+  async get<T>(path: string): Promise<T> {
+    const res = await fetch(this.url(path))
+    if (!res.ok) throw new Error(`${path}: HTTP ${res.status}`)
+    return (await res.json()) as T
+  }
+
+  status(): Promise<StatusMsg> {
+    return this.get<StatusMsg>('/status')
+  }
+
+  sessions(limit = 50): Promise<{ total: number; sessions: Session[] }> {
+    return this.get(`/sessions?limit=${limit}`)
+  }
+
+  stats(): Promise<Stats> {
+    return this.get<Stats>('/stats')
+  }
+
+  private async control(path: string, body?: { kmh: number }): Promise<StatusMsg> {
+    if (!this.client) throw new ControlError('view only', 403)
+    const res = await fetch(this.url(path), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Client-Id': this.client },
+      body: body ? JSON.stringify(body) : undefined,
+    })
+    const data = (await res.json().catch(() => ({}))) as StatusMsg & { detail?: unknown }
+    if (!res.ok) {
+      const detail = typeof data.detail === 'string' ? data.detail : `HTTP ${res.status}`
+      throw new ControlError(detail, res.status)
+    }
+    return data
+  }
+
+  start(kmh: number): Promise<StatusMsg> {
+    return this.control('/control/start', { kmh })
+  }
+
+  setSpeed(kmh: number): Promise<StatusMsg> {
+    return this.control('/control/speed', { kmh })
+  }
+
+  stop(): Promise<StatusMsg> {
+    return this.control('/control/stop')
+  }
+}

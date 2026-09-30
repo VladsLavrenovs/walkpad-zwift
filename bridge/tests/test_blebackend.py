@@ -10,7 +10,7 @@ from collections.abc import Callable
 import pytest
 
 from conftest import VirtualClock, run_until
-from fakegatt import FakeConnector, FakeService, SimulatedKsPad, ftms_services, ks_services
+from fakegatt import FakeConnector, FakeGattClient, FakeService, SimulatedKsPad, ftms_services, ks_services
 from test_kingsmith import status_frame
 from walkpad_bridge import ble
 from walkpad_bridge.backend import BackendError, BeltState, Sample
@@ -187,10 +187,12 @@ async def test_kingsmith_start_switches_to_manual_then_starts(clock: VirtualCloc
     await backend.disconnect()
 
 
-async def test_kingsmith_start_skips_mode_switch_in_manual(clock: VirtualClock) -> None:
+async def test_kingsmith_start_always_switches_to_manual(clock: VirtualClock) -> None:
+    # Even when the status already says manual: the owner's pad ignored a bare start after
+    # a long idle in manual mode.
     backend, connector = await ks_connected(clock, status_frame(belt_state=0, speed=0, mode=1))
     await backend.start()
-    assert ks_commands(connector) == [START_BELT]
+    assert ks_commands(connector) == [MANUAL_MODE, START_BELT]
     await backend.disconnect()
 
 
@@ -433,3 +435,20 @@ async def test_uncontrolled_belt_above_cap_is_only_reported(clock: VirtualClock)
     assert events == [SafetyEventKind.BELT_ABOVE_CAP]
     assert speeds_sent(connector) == []
     await backend.disconnect()
+
+
+async def test_spurious_drop_during_setup_does_not_leave_the_link_open(clock: VirtualClock) -> None:
+    """Seen on hardware: a late drop report during setup; the half-open link must be closed."""
+
+    class LateDropClient(FakeGattClient):
+        async def start_notify(self, spec, callback) -> None:  # type: ignore[no-untyped-def]
+            await super().start_notify(spec, callback)
+            self.on_disconnect()  # the drop report arrives mid-setup; the link itself is fine
+
+    connector = FakeConnector(ks_services, now=clock.now)
+    connector.client_class = LateDropClient
+    backend = BleBackend(ADDRESS, connector=connector, clock=clock)
+    with pytest.raises(BackendError, match="dropped during setup"):
+        await backend.connect()
+    assert not connector.client.is_connected
+    assert not backend.is_connected

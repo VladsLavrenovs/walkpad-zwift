@@ -1,0 +1,22 @@
+# WalkPad bridge as a systemd *user* service. Install: docs/bridge-service.md
+#
+# Paths assume the repo lives in ~/Documents/Projects/walkingpad/walkpad-zwift; edit both lines
+# below if it does not. Settings (pad address, port, limits) come from bridge/config.toml.
+
+[Unit]
+Description=WalkPad bridge (pad over BLE -> live data, sessions, LAN-only belt control)
+Documentation=file://%h/Documents/Projects/walkingpad/walkpad-zwift/docs/bridge-service.md
+
+[Service]
+Type=exec
+WorkingDirectory=%h/Documents/Projects/walkingpad/walkpad-zwift/bridge
+ExecStart=%h/Documents/Projects/walkingpad/walkpad-zwift/bridge/.venv/bin/walkpad-bridge -v serve
+Environment=PYTHONUNBUFFERED=1
+# On stop, the bridge stops the belt and waits for it; give it time before a hard kill.
+KillSignal=SIGTERM
+TimeoutStopSec=45
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

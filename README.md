@@ -3,7 +3,7 @@
 Personal, Zwift-inspired app for a KingSmith WalkingPad: live treadmill data over BLE, safe belt
 control, session history and stats, and a "walk across the world" view in CesiumJS.
 
-Status: bridge core (FAKE pad, safety controller, CLI) done; no real BLE, API or UI yet. See [CLAUDE.md](CLAUDE.md) for the full brief and rules.
+Status: bridge done as a service (real pad over BLE, sessions, stats, live WebSocket, LAN-only control); no UI yet. See [CLAUDE.md](CLAUDE.md) for the full brief and rules.
 
 ## Architecture
 

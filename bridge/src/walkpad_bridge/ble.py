@@ -3,13 +3,17 @@
 from __future__ import annotations
 
 import enum
+import logging
 import re
+import sys
 from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass, field
 from typing import Any
 
 from .backend import BackendError, Sample, SpeedRange
+
+log = logging.getLogger(__name__)
 
 
 def uuid16(short: str) -> str:
@@ -134,6 +138,9 @@ async def connect_client(
     try:
         # BlueZ can only connect to devices it has seen recently, so scan for it first.
         device = await BleakScanner.find_device_by_address(address, timeout=timeout_s)
+        if device is None and await disconnect_stale(address):
+            log.warning("BlueZ held an unused connection to %s; disconnected it", address)
+            device = await BleakScanner.find_device_by_address(address, timeout=timeout_s)
         if device is None:
             raise BackendError(f"{address} not found. {CONNECT_HINT}")
         client = BleakClient(
@@ -145,6 +152,59 @@ async def connect_client(
     except Exception as exc:
         raise BackendError(f"could not connect to {address}: {exc}. {CONNECT_HINT}") from exc
     return client
+
+
+def stale_device_paths(managed_objects: dict[str, dict[str, Any]], address: str) -> list[str]:
+    """BlueZ object paths of `address` while BlueZ reports it connected.
+
+    `managed_objects` is BlueZ's ObjectManager.GetManagedObjects() reply: path -> interface ->
+    property -> variant (anything with `.value`).
+    """
+    paths = []
+    for path, interfaces in managed_objects.items():
+        device = interfaces.get("org.bluez.Device1")
+        if device is None:
+            continue
+        if device["Address"].value.upper() == address.upper() and device["Connected"].value:
+            paths.append(path)
+    return paths
+
+
+async def disconnect_stale(address: str) -> bool:
+    """Linux: disconnect a link BlueZ holds to `address` although we are not connected.
+
+    Only called when the pad cannot be found: a connected pad does not advertise, so a leftover
+    link (a crashed process, an aborted setup) would block every reconnect. The pad accepts one
+    connection, and the bridge is the only thing on this machine that should hold it.
+    """
+    if sys.platform != "linux":
+        return False
+    try:
+        from dbus_fast import BusType, Message, MessageType  # noqa: PLC0415
+        from dbus_fast.aio import MessageBus  # noqa: PLC0415
+    except ImportError:
+        return False
+    try:
+        bus = await MessageBus(bus_type=BusType.SYSTEM).connect()
+    except Exception as exc:
+        log.debug("no system D-Bus: %s", exc)
+        return False
+    try:
+        reply = await bus.call(Message(
+            destination="org.bluez", path="/",
+            interface="org.freedesktop.DBus.ObjectManager", member="GetManagedObjects",
+        ))
+        if reply is None or reply.message_type != MessageType.METHOD_RETURN:
+            return False
+        done = False
+        for path in stale_device_paths(reply.body[0], address):
+            result = await bus.call(Message(
+                destination="org.bluez", path=path, interface="org.bluez.Device1", member="Disconnect",
+            ))
+            done = done or (result is not None and result.message_type == MessageType.METHOD_RETURN)
+        return done
+    finally:
+        bus.disconnect()
 
 
 def service_uuids(client: GattClient) -> list[str]:

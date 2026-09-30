@@ -1,4 +1,4 @@
-"""Command-line interface: `walkpad-bridge scan|inspect|live|speed|stop`."""
+"""Command-line interface: `walkpad-bridge scan|inspect|live|speed|stop|serve`."""
 
 from __future__ import annotations
 
@@ -24,11 +24,12 @@ from .config import Config, load_config
 from .fake import FakeBackend
 from .lag import LagMeter
 from .safety import SafetyConfig, SafetyError, SpeedController
+from .service import wait_until_moving
 
 CLIENT = "cli"
 STOP_CONFIRM_TIMEOUT_S = 30.0
 STOP_RETRY_S = 3.0  # resend stop if the pad still reports the belt running this long after
-START_CONFIRM_TIMEOUT_S = 15.0
+OWED_STOP_RETRY_S = 60.0  # link lost and recovery gave up: keep trying to deliver the stop
 FIRST_STATUS_TIMEOUT_S = 10.0
 DEFAULT_LOG_DIR = Path(__file__).resolve().parents[2] / "logs"
 
@@ -225,18 +226,8 @@ async def _first_sample(backend: PadBackend) -> Sample | None:
 
 async def _wait_until_moving(backend: PadBackend) -> None:
     """After start: wait until the belt actually moves (the pad counts down first)."""
-    try:
-        async with asyncio.timeout(START_CONFIRM_TIMEOUT_S):
-            async with contextlib.aclosing(backend.samples()) as samples:
-                async for sample in samples:
-                    if sample.belt is BeltState.RUNNING and sample.speed_kmh > 0:
-                        typer.echo(f"Belt moving at {sample.speed_kmh:.1f} km/h.")
-                        return
-    except TimeoutError:
-        raise BackendError(
-            f"pad did not report the belt running within {START_CONFIRM_TIMEOUT_S:g} s"
-        ) from None
-    raise BackendError("connection lost while waiting for the belt to start")
+    sample = await wait_until_moving(backend)
+    typer.echo(f"Belt moving at {sample.speed_kmh:.1f} km/h.")
 
 
 async def _until_belt_stops(backend: PadBackend) -> None:
@@ -631,6 +622,8 @@ async def _speed_session(
                 typer.echo(f"ERROR sending stop: {exc}", err=True)
             if controller.recovery_task is not None:
                 await controller.recovery_task  # reconnect + stop after a dropped link
+            if controller.stop_owed:
+                await _deliver_owed_stop(backend, controller, clock)
             stopped = await _print_until_stopped(backend, controller, on_sample)
             await controller.close()
             _report_lag(lag, echo=manual_test)
@@ -640,6 +633,29 @@ async def _speed_session(
                 typer.echo("Belt stopped.")
             else:
                 typer.echo("WARNING: could not confirm the belt stopped. CHECK THE PAD.", err=True)
+
+
+async def _deliver_owed_stop(
+    backend: PadBackend, controller: SpeedController, clock: Clock
+) -> bool:
+    """The link dropped and recovery gave up: keep trying to reconnect and stop for a while."""
+    typer.echo(
+        f"Pad unreachable; the belt may still be running. Retrying the stop for "
+        f"{OWED_STOP_RETRY_S:g} s. STOP THE PAD MANUALLY if you can.",
+        err=True,
+    )
+    start = clock.now()
+    while clock.now() - start < OWED_STOP_RETRY_S:
+        try:
+            await backend.connect()
+            await controller.reconnected()
+            typer.echo("Reconnected and sent the stop.", err=True)
+            return True
+        except BackendError as exc:
+            log.warning("owed stop not delivered yet: %s", exc)
+            await clock.sleep(2.0)
+    typer.echo("GAVE UP: could not reach the pad to stop the belt. STOP IT MANUALLY.", err=True)
+    return False
 
 
 def _report_lag(lag: LagMeter, echo: bool) -> None:
@@ -685,3 +701,45 @@ def stop(
     except BackendError as exc:
         typer.echo(f"Error: {exc}", err=True)
         raise typer.Exit(1) from exc
+
+
+@app.command()
+def serve(
+    address: AddressArg = None,
+    fake: FakeOpt = False,
+    protocol: ProtocolOpt = None,
+    host: Annotated[str | None, typer.Option(help="Listen address. Default: [server] host.")] = None,
+    port: Annotated[int | None, typer.Option(help="Listen port. Default: [server] port.")] = None,
+    fake_speed: FakeSpeedOpt = 0.0,
+    config: ConfigOpt = None,
+) -> None:
+    """Run the bridge service: live WebSocket, sessions, stats, LAN-only control, the web app.
+
+    Keeps running when the pad is off or taken by the phone app, and reconnects when it can.
+    """
+    import uvicorn  # noqa: PLC0415  (only the service needs it)
+
+    from .server import create_app  # noqa: PLC0415
+    from .service import BridgeService  # noqa: PLC0415
+    from .storage import Store  # noqa: PLC0415
+
+    cfg = load_config(config)
+    backend: PadBackend
+    if fake:
+        backend, _ = _make_fake(fake_speed, 1.0)
+        protocol_name = "fake"
+    else:
+        backend = _make_ble(address, protocol, cfg)
+        protocol_name = None
+    store = Store(cfg.storage.db_file())
+    service = BridgeService(backend, cfg, store, protocol_name=protocol_name)
+    listen_host = host or cfg.server.host
+    listen_port = port or cfg.server.port
+    typer.echo(
+        f"Serving on http://{listen_host}:{listen_port} (database {cfg.storage.db_file()}). "
+        "Ctrl+C stops the belt and exits."
+    )
+    try:
+        uvicorn.run(create_app(service, cfg), host=listen_host, port=listen_port, log_config=None)
+    finally:
+        store.close()

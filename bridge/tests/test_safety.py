@@ -439,3 +439,31 @@ async def test_close_reports_its_stop(controller: SpeedController) -> None:
     controller.add_command_listener(lambda name, _kmh: seen.append(name))
     await controller.close()
     assert seen == ["stop"]
+
+
+# --- a stop owed after a lost link is delivered on any later reconnect (hardware check 6) ------
+
+
+async def test_stop_stays_owed_when_recovery_gives_up(
+    walking_fake: FakeBackend, clock: VirtualClock
+) -> None:
+    controller = SpeedController(walking_fake, SafetyConfig(), clock)
+    await controller.set_speed(3.0, client="page")
+    walking_fake.fail_connects = 3  # the Bluetooth adapter is off for all three attempts
+    walking_fake.simulate_connection_loss()
+    assert await controller.recovery_task is False  # type: ignore[misc]
+    assert controller.stop_owed
+    assert walking_fake.belt_state is BeltState.RUNNING  # the pad keeps going on its own
+
+    await walking_fake.connect()  # someone else (the service loop) reconnects later
+    await controller.reconnected()
+    assert walking_fake.commands[-1].name == "stop"
+    assert not controller.stop_owed and controller.controlling_client is None
+    await controller.set_speed(0)  # usable again
+
+
+async def test_reconnected_is_a_no_op_without_an_owed_stop(
+    controller: SpeedController, walking_fake: FakeBackend
+) -> None:
+    await controller.reconnected()
+    assert walking_fake.commands == []

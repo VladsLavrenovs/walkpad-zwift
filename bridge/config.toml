@@ -21,3 +21,33 @@ scan_timeout_s = 8.0
 connect_timeout_s = 20.0
 # KingSmith pads only report status when asked; this is how often we ask (min 0.5).
 kingsmith_poll_s = 1.0
+
+[server]
+# `walkpad-bridge serve` listens here. 0.0.0.0 = reachable on the LAN (http://<laptop>:8080).
+host = "0.0.0.0"
+port = 8080
+# Built web app served at /, relative to bridge/ (build it with `npm run build` in web/).
+web_dist = "../web/dist"
+# Belt control is accepted only from localhost/LAN. Requests through the Cloudflare Tunnel
+# (or any proxy) are read-only unless this is true. Keep it false.
+allow_remote_control = false
+# Extra Host names allowed for control, besides IP addresses, localhost and this machine's name.
+control_hosts = []
+# Origins that may read live data and stats cross-origin (the deployed web app).
+cors_origins = ["https://walk.connectedovals.com"]
+# Controlling page gone (refresh, Wi-Fi blip): wait this long, then ramp the belt down and stop.
+client_grace_s = 5.0
+# Pad unreachable (off, or the phone app has it): retry this often.
+reconnect_interval_s = 5.0
+
+[storage]
+# SQLite database, relative to bridge/ (git-ignored).
+db_path = "data/walkpad.sqlite"
+# Sessions shorter than this (e.g. a quick start/stop) are not kept.
+min_session_s = 10.0
+
+[udp]
+# Live samples as JSON datagrams, for the Windows game receiver.
+enabled = false
+host = ""
+port = 5005

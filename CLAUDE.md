@@ -75,4 +75,7 @@ Cloudflare Access allowing only the owner's email.
   KingSmith vs FTMS (0x1826) anyway.
 - Start: the pad counts down (belt states 9, 8, 7) and then runs up to its own start speed
   (2.5 km/h) unless the bridge pins the speed right after it starts moving.
-- The belt keeps running when the BLE link drops.
+- The belt keeps running when the BLE link drops. The bridge owes a stop until it reaches the pad.
+- The pad stops the belt by itself about 35 s after nobody is on it, and its time/steps counters
+  only count while someone walks.
+- After a long idle, start needs the switch to manual mode first (the bridge always sends it).

@@ -3,10 +3,9 @@
 Python 3.12 service that talks to the WalkingPad over BLE and exposes live data and stats
 (HTTP + WebSocket, UDP for the Windows receiver). Managed with [uv](https://docs.astral.sh/uv/).
 
-Status: core done (backend interface, FAKE pad, safety controller, CLI). Real pad over BLE:
-scan, inspect and live data are verified on the owner's pad; belt control (start/stop/speed,
-always through SpeedController) is implemented and gated behind `--manual-test` until it has
-been tested on the pad. No HTTP API or storage yet.
+Status: runs as a service (`serve`): live WebSocket, SQLite sessions and stats, UDP output,
+LAN-only belt control, and it serves the built web app. Real pad over BLE: live data and belt
+control verified on the owner's pad (see below); the CLI `speed` still needs `--manual-test`.
 
 ## Develop
 
@@ -79,6 +78,70 @@ start first switches the pad to manual mode and waits 1.5 s, as ph4-walkingpad d
 control (request control, start, stop, target speed via the Control Point) follows the spec but
 is only tested against a fake client. `live` still never writes anything but status queries.
 
+## Service (`serve`)
+
+```sh
+uv run walkpad-bridge serve --fake          # simulated pad, http://localhost:8080
+uv run walkpad-bridge serve                 # the real pad ([ble] address in config.toml)
+uv run walkpad-bridge serve 57:4C:4E:36:10:BB --port 8081
+```
+
+Always-on install with systemd: [docs/bridge-service.md](../docs/bridge-service.md). The service
+keeps running when the pad is off or the phone app has it, retrying every `reconnect_interval_s`.
+Only one BLE connection exists, so stop the service before using the CLI commands above on the
+real pad. Stopping the service (Ctrl+C, SIGTERM) stops the belt and closes the open session.
+
+| Endpoint | Who | What |
+|---|---|---|
+| `GET /` | anyone | the built web app (`web/dist`), or a placeholder page if not built |
+| `GET /status` | anyone | connection, belt, speed, cap, target, controlling client, session id, `control_allowed` for the caller |
+| `GET /sessions?limit&offset` | anyone | sessions, newest first, with totals and `avg_speed_kmh` |
+| `GET /sessions/{id}` | anyone | one session with its per-second samples |
+| `GET /stats` | anyone | `daily` (7 days), `weekly` (8 weeks, Monday start), `monthly` (12), `streaks`, `personal_bests`, `all_time` |
+| `WS /live?client=<id>` | anyone | JSON messages: `status` on connect and on changes, `sample` per pad report, `safety` events |
+| `POST /control/start {"kmh": 1.5}` | localhost/LAN | start, then (once moving) ramp to kmh |
+| `POST /control/speed {"kmh": 2.0}` | localhost/LAN | ramp to kmh |
+| `POST /control/stop` | localhost/LAN | stop now |
+
+Control responses are the new status plus `applied_target_kmh`: the target **after** the cap, not
+the request echoed. Errors: 403 not allowed from here, 409 not possible now (no WebSocket for this
+client, pad not connected, belt still starting), 422 bad input, 503 pad write failed.
+
+**Control rules** (see `access.py`, `service.py`):
+- Only from localhost or a private/link-local LAN address. Requests carrying Cloudflare or proxy
+  forwarding headers (`Cf-Connecting-Ip`, `X-Forwarded-For`, ...) are remote even though
+  `cloudflared` connects from localhost. `[server] allow_remote_control` (default false) lifts this.
+- The `Host` header must name this machine (IP, `localhost`, its hostname, or `control_hosts`):
+  stops DNS-rebinding pages.
+- An `X-Client-Id` header is required. It forces a CORS preflight, and CORS allows GET only, so
+  another site's page in a LAN browser cannot control the belt.
+- The client must hold `/live?client=<same id>` open from localhost/LAN (stop excepted). When the
+  controlling client's last socket closes, the bridge waits `client_grace_s` (5 s) for it to
+  return (refresh, Wi-Fi blip), then ramps down to the device minimum at the ramp rate and stops.
+  Any client taking control during the ramp-down (start/speed/stop) cancels it.
+- All the SpeedController rules below apply (cap, ramp, pin after start, hold, failsafe).
+
+**Sessions** start when the belt first moves (not during the countdown) and end when the pad
+reports it stopped or the pad connection drops. A connection that comes back within 60 s with
+the pad's counters still running resumes the same session instead of starting a second one. Totals come from the pad's counters, carried
+across the resets the pad does while slowing down. At most one sample per second is stored.
+Sessions under `min_session_s` (10 s) are dropped. A crash leaves correct totals; the session is
+closed on the next start. Database: `bridge/data/walkpad.sqlite`.
+
+**Stats**: local time of the laptop. A streak day needs 60 s of walking; the current streak
+still counts until today is over. Fastest average speed only counts sessions of 5+ minutes.
+
+**UDP** (`[udp] enabled = true`, `host`, `port`): every `sample` message as one JSON datagram,
+fire and forget.
+
+Message examples:
+
+```json
+{"type": "sample", "t": 1790792206.12, "speed_kmh": 1.5, "distance_m": 40.0, "steps": 71,
+ "elapsed_s": 64.0, "belt": "running", "session_id": 12}
+{"type": "safety", "kind": "belt_above_cap", "message": "...", "speed_kmh": 1.8, "cap_kmh": 1.5}
+```
+
 ## CLI (FAKE pad)
 
 ```sh
@@ -104,6 +167,13 @@ On Windows (dev only) the signals are Ctrl+C and Ctrl+Break; SIGTERM there is an
 | `blebackend.py` | `BleBackend`: the real pad. Owns the connection, picks a protocol handler on connect (sticks with it across reconnects), fans samples out, reports link loss. Guards belt commands (see above). |
 | `kingsmith.py` | KingSmith frames, status parser, `KingsmithProtocol` (notify + status polling). |
 | `ftms.py` | FTMS Treadmill Data / Supported Speed Range parsers, `FtmsSession` (merges split packets, integrates when the pad sends speed only), `FtmsProtocol`. |
+| `storage.py` | SQLite (stdlib `sqlite3`): sessions and per-second samples, crash-safe totals. |
+| `recorder.py` | `SessionRecorder`: samples in, sessions out; start/end with the belt, counter resets. |
+| `stats.py` | Period totals, streaks, personal bests over finished sessions. |
+| `service.py` | `BridgeService`: pad connection loop, controller, recorder, WebSocket/UDP fan-out, client grace period. |
+| `access.py` | Who may control: localhost/LAN, tunnel detection, Host check. |
+| `server.py` | FastAPI app: endpoints above, CORS, the web app. |
+| `udp.py` | `UdpSender`: JSON datagrams. |
 | `lag.py` | `LagMeter`: command-to-effect lag from SpeedController command events and samples. |
 | `safety.py` | `SpeedController`: the **only** code allowed to call `backend.set_speed` (a test enforces this). |
 | `clock.py` | Injectable clock, so tests run ramps on virtual time. |
@@ -138,14 +208,11 @@ which answers status queries and obeys commands), so all BLE code runs without B
 autouse fixture makes real Bluetooth unreachable from tests, even though config.toml names the
 real pad.
 
-## TODO (HTTP API milestone)
+## TODO (later)
 
-- Enforce control from localhost/LAN only, with remote access read-only (CLAUDE.md).
-- Speed responses must include the **actually applied target** (the value `set_speed()` returns
-  after clamping), not just echo the request.
-- Push `SafetyEvent`s to clients over the WebSocket.
-- `SpeedController` should subscribe to the backend's sample stream itself instead of relying
-  on callers to call `observe()` (today a caller that forgets means above-cap goes unreported).
+- `SpeedController` still relies on callers to feed `observe()`. The service and the CLI both do;
+  a new caller that forgets would lose above-cap detection and hold. Consider having the
+  controller subscribe to the backend itself.
 
 ## TODO (web milestone)
 
@@ -156,8 +223,28 @@ real pad.
 
 ## Config
 
-- Non-secret settings: [config.toml](config.toml) (`[safety]` limits, `[ble]` address, protocol, timeouts).
+- Non-secret settings: [config.toml](config.toml): `[safety]` limits, `[ble]` address/protocol/timeouts,
+  `[server]` listen address, control and CORS rules, grace period, `[storage]` database, `[udp]` output.
 - Secrets: `bridge/.env` (git-ignored). See `.env.example`.
+
+## Service: what was verified on the owner's pad (2026-09-30)
+
+Run by Claude against the real pad through `serve` (cap 1.5 km/h, test database), with the owner
+walking and reporting what the belt did:
+
+- Start via `POST /control/start` at 1.0 km/h, hold, explicit stop (stops 2.6 s later); the
+  session is recorded and appears in `/stats`.
+- Controlling client gone: 5 s grace, then ramp down and stop (about 8 s from disconnect to a
+  stopped belt). A reconnect within the grace period keeps the belt running.
+- SIGINT to the service while walking: stop sent on shutdown, session closed, clean exit.
+- Bluetooth off for 3 s while walking: the belt keeps running while the link is down; the
+  service reconnects and sends the owed stop first; belt stopped 7.8 s after Bluetooth returned.
+- Found and fixed on the way: (1) a stop owed after a lost link was never sent once the
+  controller's quick retries had given up (the belt ran 40 s more); (2) a spurious drop during
+  setup left a half-open BlueZ link that blocked all reconnects; (3) a bare start (no switch to
+  manual mode) was ignored after ~10 min idle; (4) a dropout split one walk into two sessions
+  that counted the same minutes twice.
+- The pad stops the belt on its own about 35 s after nobody is on it (its own safety feature).
 
 ## Belt control: what was verified on the owner's pad (2026-09-30)
 

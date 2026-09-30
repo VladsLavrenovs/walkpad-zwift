@@ -7,6 +7,7 @@ status query to FE02 once per poll interval and decode the `F8 A2` status replie
 Belt commands (only ever reached through SpeedController -> BleBackend):
 - start: switch to manual mode `A2 02 01`, wait, then `A2 04 01`. ph4-walkingpad warns that
   start acts like a toggle on some pads, so BleBackend only starts a belt it knows is stopped.
+  The mode switch is always sent (a bare start was ignored after a long idle).
 - speed: `A2 01 <km/h * 10>`.  stop: speed 0.
 
 All writes, status queries included, go through one lock with a minimum gap between them,
@@ -149,9 +150,11 @@ class KingsmithProtocol(ProtocolHandler):
                 await task
 
     async def start_belt(self) -> None:
-        if self.last_status is None or self.last_status.mode != MODE_MANUAL:
-            await self._send(MANUAL_MODE, "manual mode")
-            await self.clock.sleep(MODE_SWITCH_SETTLE_S)
+        # Always switch to manual mode first, as ph4-walkingpad does. Skipping it when the status
+        # already said manual worked a few minutes after a stop, but after ~10 min idle the
+        # owner's pad ignored the bare start (2026-09-30).
+        await self._send(MANUAL_MODE, "manual mode")
+        await self.clock.sleep(MODE_SWITCH_SETTLE_S)
         await self._send(START_BELT, "start")
 
     async def stop_belt(self) -> None:

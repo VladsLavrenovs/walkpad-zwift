@@ -47,6 +47,7 @@ class BleBackend(PadBackend):
         self._generation = 0
         self._last: Sample | None = None
         self._subscribers: set[asyncio.Queue[Sample | None]] = set()
+        self._connect_lock = asyncio.Lock()
 
     @property
     def protocol(self) -> Protocol | None:
@@ -74,6 +75,11 @@ class BleBackend(PadBackend):
         return 0.0 if self._last is None else self._last.speed_kmh
 
     async def connect(self) -> None:
+        # The service's reconnect loop and SpeedController's recovery may both try: one link only.
+        async with self._connect_lock:
+            await self._connect()
+
+    async def _connect(self) -> None:
         if self._client is not None:
             return
         self._generation += 1
@@ -96,6 +102,11 @@ class BleBackend(PadBackend):
             raise BackendError(f"could not start live data: {exc}") from exc
         if generation != self._generation:  # dropped while we were setting up
             await handler.stop()
+            # Close it anyway: a spurious drop report (e.g. a late one from an earlier link)
+            # would otherwise leave BlueZ holding a live link nobody uses, and a connected pad
+            # stops advertising, so every later connect fails with "not found" (seen on hardware).
+            with contextlib.suppress(Exception):
+                await client.disconnect()
             raise BackendError("connection dropped during setup")
         self.handler = handler
         self._client = client

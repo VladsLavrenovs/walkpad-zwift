@@ -74,3 +74,21 @@ def test_format_value() -> None:
     assert ble.format_value(b"\x00") == "00"
     # Real WalkingPad model string (NUL-terminated).
     assert ble.format_value(b"WLT8266M\x00") == '57 4c 54 38 32 36 36 4d 00  "WLT8266M"'
+
+
+class V:
+    def __init__(self, value: object) -> None:
+        self.value = value
+
+
+def test_stale_device_paths() -> None:
+    objects = {
+        "/org/bluez/hci0": {"org.bluez.Adapter1": {"Address": V("00:11:22:33:44:55")}},
+        "/org/bluez/hci0/dev_57_4C": {"org.bluez.Device1": {"Address": V("57:4C:4E:36:10:BB"),
+                                                            "Connected": V(True)}},
+        "/org/bluez/hci0/dev_74_45": {"org.bluez.Device1": {"Address": V("74:45:CE:CC:02:28"),
+                                                            "Connected": V(True)}},
+    }
+    assert ble.stale_device_paths(objects, "57:4c:4e:36:10:bb") == ["/org/bluez/hci0/dev_57_4C"]
+    objects["/org/bluez/hci0/dev_57_4C"]["org.bluez.Device1"]["Connected"] = V(False)
+    assert ble.stale_device_paths(objects, "57:4C:4E:36:10:BB") == []

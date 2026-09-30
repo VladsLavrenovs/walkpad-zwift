@@ -12,7 +12,20 @@ from typing import Any
 from .ble import Protocol
 from .safety import SafetyConfig
 
-DEFAULT_PATH = Path(__file__).resolve().parents[2] / "config.toml"
+BRIDGE_DIR = Path(__file__).resolve().parents[2]
+DEFAULT_PATH = BRIDGE_DIR / "config.toml"
+
+
+def _positive(section: str, obj: object, *names: str) -> None:
+    for name in names:
+        value = getattr(obj, name)
+        if not (math.isfinite(value) and value > 0):
+            raise ValueError(f"{section}.{name} must be a positive number, got {value!r}")
+
+
+def _port(section: str, value: int) -> None:
+    if not 0 < value < 65536:
+        raise ValueError(f"{section} port must be 1-65535, got {value!r}")
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,12 +52,72 @@ class BleConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class ServerConfig:
+    host: str = "0.0.0.0"  # LAN; control is still limited to localhost/LAN clients
+    port: int = 8080
+    web_dist: str = "../web/dist"  # built web app, relative to bridge/
+    # Belt control from outside localhost/LAN (e.g. through the Cloudflare Tunnel). Off per CLAUDE.md.
+    allow_remote_control: bool = False
+    # Extra Host names allowed for control requests (IP literals, localhost and this machine's
+    # hostname are always allowed). Guards against DNS rebinding.
+    control_hosts: tuple[str, ...] = ()
+    # Origins allowed to read (GET, WebSocket) cross-origin, e.g. the deployed web app.
+    cors_origins: tuple[str, ...] = ("https://walk.connectedovals.com",)
+    # Controlling client gone: wait this long for it to reconnect, then ramp down and stop.
+    client_grace_s: float = 5.0
+    reconnect_interval_s: float = 5.0  # pad unreachable: retry this often
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "control_hosts", tuple(self.control_hosts))
+        object.__setattr__(self, "cors_origins", tuple(self.cors_origins))
+        _positive("server", self, "client_grace_s", "reconnect_interval_s")
+        _port("server", self.port)
+
+    def web_dist_path(self) -> Path:
+        return (BRIDGE_DIR / self.web_dist).resolve()
+
+
+@dataclass(frozen=True, slots=True)
+class StorageConfig:
+    db_path: str = "data/walkpad.sqlite"  # relative to bridge/
+    min_session_s: float = 10.0  # shorter sessions (e.g. a start/stop test) are discarded
+
+    def __post_init__(self) -> None:
+        if self.min_session_s < 0:
+            raise ValueError("storage.min_session_s must not be negative")
+
+    def db_file(self) -> Path:
+        return (BRIDGE_DIR / self.db_path).resolve()
+
+
+@dataclass(frozen=True, slots=True)
+class UdpConfig:
+    enabled: bool = False
+    host: str = ""  # e.g. the Windows PC running the game receiver
+    port: int = 5005
+
+    def __post_init__(self) -> None:
+        _port("udp", self.port)
+        if self.enabled and not self.host:
+            raise ValueError("udp.host must be set when udp.enabled is true")
+
+
+@dataclass(frozen=True, slots=True)
 class Config:
     safety: SafetyConfig = field(default_factory=SafetyConfig)
     ble: BleConfig = field(default_factory=BleConfig)
+    server: ServerConfig = field(default_factory=ServerConfig)
+    storage: StorageConfig = field(default_factory=StorageConfig)
+    udp: UdpConfig = field(default_factory=UdpConfig)
 
 
-SECTIONS: dict[str, Any] = {"safety": SafetyConfig, "ble": BleConfig}
+SECTIONS: dict[str, Any] = {
+    "safety": SafetyConfig,
+    "ble": BleConfig,
+    "server": ServerConfig,
+    "storage": StorageConfig,
+    "udp": UdpConfig,
+}
 
 
 def load_config(path: Path | None = None) -> Config:

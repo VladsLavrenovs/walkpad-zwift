@@ -212,6 +212,35 @@ class SpeedController:
             log.warning("controlling client %r disconnected; stopping belt", client)
             await self.stop()
 
+    async def ramp_down_and_stop(self, client: str) -> None:
+        """The controlling `client` is gone for good: ramp down to the device minimum at the
+        ramp rate, then stop. Control is released first, so if any client takes control during
+        the ramp-down (sets a speed, starts, stops), this backs off and leaves the belt to it.
+        """
+        if client != self._controlling_client:
+            return
+        self._controlling_client = None
+        if not self.backend.is_connected or self._connection_lost:
+            return  # the connection-lost recovery stops the belt
+        if self.backend.belt_state is not BeltState.RUNNING:
+            if self.backend.belt_state is not BeltState.STOPPED:
+                await self.stop()
+            return
+        log.warning("controlling client %r gone; ramping down to a stop", client)
+        try:
+            if self.backend.speed_kmh > self._kmh(self._min_units) + self._res / 2:
+                await self.set_speed(self._kmh(self._min_units))
+                await self.wait_until_reached()
+        except (BackendError, SafetyError) as exc:
+            log.error("ramp-down failed (%s); stopping at once", exc)
+        except asyncio.CancelledError:
+            task = asyncio.current_task()
+            if task is not None and task.cancelling():
+                raise  # we ourselves are being cancelled
+            # Otherwise the ramp we waited on was cancelled (someone stopped the belt).
+        if self._controlling_client is None:
+            await self.stop()
+
     async def close(self) -> None:
         """Stop the belt if needed and disconnect."""
         await self._cancel_ramp()
@@ -391,5 +420,28 @@ class SpeedController:
             self._controlling_client = None
             log.warning("reconnected to pad and stopped the belt")
             return True
-        log.critical("could not reconnect to stop the belt. STOP THE PAD MANUALLY.")
+        # The stop stays owed: whoever reconnects next must call reconnected() (the service's
+        # reconnect loop does), which sends it before anything else.
+        log.critical("could not reconnect to stop the belt. STOP THE PAD MANUALLY. "
+                     "The stop will be sent as soon as the pad is reachable again.")
         return False
+
+    @property
+    def stop_owed(self) -> bool:
+        """The connection dropped and no stop has reached the pad since."""
+        return self._connection_lost
+
+    async def reconnected(self) -> None:
+        """Call after reconnecting the backend yourself. Sends the stop still owed from a lost
+        connection (the belt keeps running when the link drops); no-op otherwise.
+        Raises BackendError if the stop cannot be sent; the stop then stays owed.
+        """
+        if not self._connection_lost:
+            return
+        if self.recovery_task is not None and not self.recovery_task.done():
+            return  # recovery is still trying; it sends the stop itself
+        await self.backend.stop()
+        self._sent("stop")
+        self._connection_lost = False
+        self._controlling_client = None
+        log.warning("pad reachable again: sent the stop owed since the connection was lost")

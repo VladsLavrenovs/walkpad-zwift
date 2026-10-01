@@ -84,6 +84,32 @@ always has the same scenery. Progress is stored by the bridge, so a long route t
 
 New dependency: `leaflet` (the standard small 2D map library; OpenStreetMap tiles, credited).
 
+## Real world (3D) world
+
+Google Photorealistic 3D Tiles in CesiumJS, following the active route. Off unless
+`VITE_WORLD_MODE=real` (then it is in the menu); the key setup and the cost guard are in
+[docs/keys.md](../docs/keys.md).
+
+- Position = distance along the active route, interpolated every frame (the same smooth route
+  position as the minimap). No active route: it waits and requests nothing from Google.
+- Heading looks 12 m ahead along the route, damped, so corners become curves.
+- Chase camera ~25 m behind, ~15 m above, raised if the 3D tiles (ground, roofs) under it are
+  higher; heights sampled from the tiles every 0.3 s and damped.
+- Google's attribution (Cesium's credit display) is kept visible at the top left.
+- The walker sprite stays as in every other world.
+- Before anything is fetched from Google the bridge must grant a session; refused, it falls back
+  to the placeholder world with "3D world limit reached — resets tomorrow/next month".
+- Cesium is a separate ~5 MB chunk loaded only then; its static assets (~8 MB) are copied to
+  `dist/cesium` by a small Vite plugin (`vite.config.ts`). With the world off, Cesium is not in
+  the bundle at all.
+
+| Module | Role |
+|---|---|
+| `worlds/realworld.ts` | The world: session request, Cesium viewer + Google tileset, camera every frame. |
+| `worlds/chase.ts` | Pure camera maths (look-ahead heading, angle damping, chase offset, ground clamp), unit-tested. |
+
+New dependency: `cesium` (CesiumJS, the 3D globe engine named in CLAUDE.md).
+
 ## YouTube walk world
 
 A walking-tour video, full screen, first person (the walker is hidden; the toolbar's "walker"

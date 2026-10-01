@@ -4,6 +4,7 @@
  */
 
 import type { BridgeClient } from '../bridge'
+import type { Polyline } from '../routes/geo'
 
 /** What the app offers a world. */
 export interface WorldContext {
@@ -14,6 +15,10 @@ export interface WorldContext {
   setWalkerVisible(on: boolean): void
   /** true for `?view=obs`: no world UI either. */
   obs: boolean
+  /** The active route's shape, once loaded (null: no active route). */
+  route(): Polyline | null
+  /** Give up on this world: the app switches to the default world and shows `message`. */
+  fallback(message: string): void
 }
 
 export interface World {

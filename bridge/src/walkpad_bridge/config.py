@@ -103,12 +103,26 @@ class UdpConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class Google3dConfig:
+    # Google Photorealistic 3D Tiles sessions the bridge grants (each one costs money).
+    max_sessions_per_day: int = 25
+    max_sessions_per_month: int = 900
+
+    def __post_init__(self) -> None:
+        for name in ("max_sessions_per_day", "max_sessions_per_month"):
+            value = getattr(self, name)
+            if not isinstance(value, int) or value < 0:
+                raise ValueError(f"google_3d.{name} must be a whole number >= 0, got {value!r}")
+
+
+@dataclass(frozen=True, slots=True)
 class Config:
     safety: SafetyConfig = field(default_factory=SafetyConfig)
     ble: BleConfig = field(default_factory=BleConfig)
     server: ServerConfig = field(default_factory=ServerConfig)
     storage: StorageConfig = field(default_factory=StorageConfig)
     udp: UdpConfig = field(default_factory=UdpConfig)
+    google_3d: Google3dConfig = field(default_factory=Google3dConfig)
 
 
 SECTIONS: dict[str, Any] = {
@@ -117,6 +131,7 @@ SECTIONS: dict[str, Any] = {
     "server": ServerConfig,
     "storage": StorageConfig,
     "udp": UdpConfig,
+    "google_3d": Google3dConfig,
 }
 
 

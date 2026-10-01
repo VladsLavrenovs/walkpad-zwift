@@ -7,6 +7,9 @@ Control, localhost/LAN only (see access.py), with an `X-Client-Id` header naming
   POST /control/start {"kmh": 1.5}, POST /control/speed {"kmh": 2.0}, POST /control/stop
 Video library for the YouTube world: GET /videos for everyone; POST /videos, PATCH and DELETE
 /videos/{id} localhost/LAN only with `X-Client-Id` (remote access is read-only), no /live needed.
+Google 3D tiles cost guard: POST /tiles3d/session before the web app creates a 3D tiles
+session (429 above the [google_3d] limits), GET /tiles3d/usage for the stats page. Open to any
+page that can reach the bridge (OBS views use the 3D world too); every grant is counted.
 Routes: GET /routes, /routes/{id} for everyone; importing (POST /routes/gpx), planning via
 OpenRouteService (POST /routes/plan; the key stays on the bridge), saving, editing, choosing the
 active route and deleting are localhost/LAN only, like the video library.
@@ -26,7 +29,7 @@ from typing import Annotated, Any
 
 from fastapi import Body, Depends, FastAPI, Header, HTTPException, Query, Request, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from starlette.types import Receive, Scope, Send
 from pydantic import BaseModel, Field
@@ -37,6 +40,7 @@ from .backend import BackendError
 from .config import Config
 from .service import BridgeService, ControlError, sample_message
 from .stats import compute_stats
+from .tiles3d import Tiles3dGuard
 from .storage import DEFAULT_PACE_KMH
 from .ors import OrsError, plan_walk
 from .routes import clean_points, parse_gpx, route_length_m
@@ -259,6 +263,33 @@ def create_app(service: BridgeService, config: Config) -> FastAPI:
     async def delete_video(video_id: int, _client: str = client_dep) -> None:
         if not service.store.delete_video(video_id):
             raise HTTPException(404, "no such video")
+
+    # --- Google 3D tiles cost guard ----------------------------------------------------------------
+
+    guard = Tiles3dGuard(
+        service.store,
+        config.google_3d.max_sessions_per_day,
+        config.google_3d.max_sessions_per_month,
+        service.wall_clock,
+    )
+
+    @app.post("/tiles3d/session")
+    async def tiles3d_session(
+        x_client_id: Annotated[str | None, Header(pattern=CLIENT_ID_PATTERN)] = None,
+    ) -> Response:
+        grant = guard.request(x_client_id)
+        if not grant.granted:
+            log.warning("3D tiles session refused: %s (%s)", grant.message, grant.usage)
+            return JSONResponse(
+                {"detail": grant.message, "reason": grant.reason, "usage": grant.usage}, status_code=429
+            )
+        log.info("3D tiles session granted: %d today, %d this month", grant.usage["today"],
+                 grant.usage["this_month"])
+        return JSONResponse({"granted": True, "usage": grant.usage})
+
+    @app.get("/tiles3d/usage")
+    async def tiles3d_usage() -> dict[str, Any]:
+        return guard.usage()
 
     # --- routes -----------------------------------------------------------------------------------
 

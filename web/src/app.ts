@@ -24,6 +24,8 @@ import { WORLDS, findWorld } from './worlds'
 import type { World } from './worlds/world'
 
 const WORLD_KEY = 'walkpad.world'
+/** Worlds that cost money per load: in dev, never restored on a reload (CLAUDE.md cost rules). */
+const COSTLY_WORLDS = new Set(['real'])
 
 export class App {
   private readonly root: HTMLElement
@@ -38,6 +40,7 @@ export class App {
   private readonly routeTracker = new RouteTracker()
   private world: World | null = null
   private worldId = ''
+  private worldSelect!: HTMLSelectElement
   private status: StatusMsg | null = null
   private link: LinkState = 'connecting'
   private controlAllowed = false
@@ -103,7 +106,9 @@ export class App {
 
     const select = q<HTMLSelectElement>('.world-menu select')
     select.replaceChildren(...WORLDS.map((w) => new Option(w.name, w.id)))
-    const saved = config.obs ? null : safeStorage()?.getItem(WORLD_KEY)
+    this.worldSelect = select
+    let saved = config.obs ? null : safeStorage()?.getItem(WORLD_KEY)
+    if (import.meta.env.DEV && saved && COSTLY_WORLDS.has(saved)) saved = null
     const initial =
       findWorld(config.world) ?? findWorld(saved ?? null) ?? (config.obs ? findWorld('overlay') : WORLDS[0])
     select.value = initial!.id
@@ -132,6 +137,14 @@ export class App {
         if (this.world === world) this.walker.visible = on
       },
       obs: this.config.obs,
+      route: () => this.minimap.line,
+      fallback: (message) => {
+        if (this.world !== world) return
+        this.toast(message, 8000)
+        const fallback = WORLDS[0].id
+        this.worldSelect.value = fallback
+        void this.setWorld(fallback)
+      },
     })
     if (!this.config.obs) {
       try {

@@ -19,6 +19,18 @@ possible. Tick them off there.
       again later: progress continues where it stopped.
 - [ ] Import a real GPX file (e.g. exported from a hiking app): name and length look right.
 
+## Real world (needs a Google Map Tiles API key)
+
+- [ ] Key created and restricted (docs/keys.md); `VITE_WORLD_MODE=real` and the key in
+      `web/.env`; `make update`.
+- [ ] With an active route, choose "Real world (3D)": photorealistic 3D at the route start, the
+      walker over it, Google's attribution visible (top left).
+- [ ] Walk: the camera follows the route smoothly ~25 m behind / ~15 m above, turns are curves
+      (not snaps), it does not dive into buildings or hills.
+- [ ] Stats page: the 3D sessions tile counts the load (1 per world load / page reload).
+- [ ] Optional: set `max_sessions_per_day = 1` in bridge/config.toml (restart the service), load
+      the 3D world twice: the second time it falls back with "limit reached — resets tomorrow".
+
 ## Prompt 8 (Cloudflare: Pages deploy, Tunnel, Access)
 
 - [ ] Through the tunnel (`https://walkpad-bridge.connectedovals.com`), control is refused:

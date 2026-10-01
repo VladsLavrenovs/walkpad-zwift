@@ -106,6 +106,8 @@ real pad. Stopping the service (Ctrl+C, SIGTERM) stops the belt and closes the o
 | `POST /videos {"url": "...", "pace_kmh": 4.5}` | localhost/LAN | add a YouTube link (201; 200 if already there; 422 not a YouTube link) |
 | `PATCH /videos/{id} {"title"?, "pace_kmh"?, "position_s"?}` | localhost/LAN | edit; a new position also marks it last played |
 | `DELETE /videos/{id}` | localhost/LAN | remove |
+| `POST /tiles3d/session` | anyone (counted) | permission for one Google 3D tiles session; 429 `{"detail": "3D world limit reached — resets tomorrow"}` over `[google_3d]` limits |
+| `GET /tiles3d/usage` | anyone | `{today, this_month, per_day, per_month, day, month}` |
 | `GET /routes` | anyone | routes (no points), active first |
 | `GET /routes/{id}` | anyone | one route with its points `[[lat, lon], ...]` |
 | `POST /routes/gpx?name=...` (body: the GPX file) | localhost/LAN | import track points (else route points), segments joined; 5 MB max |
@@ -138,8 +140,8 @@ reports it stopped or the pad connection drops. A connection that comes back wit
 the pad's counters still running resumes the same session instead of starting a second one. Totals come from the pad's counters, carried
 across the resets the pad does while slowing down. At most one sample per second is stored.
 Sessions under `min_session_s` (10 s) are dropped. A crash leaves correct totals; the session is
-closed on the next start. Database: `bridge/data/walkpad.sqlite` (schema v3: older databases gain
-the `videos` and `routes` tables on the next start; sessions are untouched).
+closed on the next start. Database: `bridge/data/walkpad.sqlite` (schema v4: older databases gain
+the `videos`, `routes` and `tiles3d_sessions` tables on the next start; sessions are untouched).
 
 **Stats**: local time of the laptop. A streak day needs 60 s of walking; the current streak
 still counts until today is over. Fastest average speed only counts sessions of 5+ minutes.
@@ -194,6 +196,7 @@ On Windows (dev only) the signals are Ctrl+C and Ctrl+Break; SIGTERM there is an
 | `server.py` | FastAPI app: endpoints above, CORS, the web app. |
 | `udp.py` | `UdpSender`: JSON datagrams. |
 | `youtube.py` | YouTube link parsing (id and `t=` start) for the video library. |
+| `tiles3d.py` | Cost guard for Google 3D tiles: counts granted sessions per local day/month, refuses over the limits. |
 | `routes.py` | GPX parsing, route geometry, `RouteProgress` (walked distance -> active route). |
 | `ors.py` | OpenRouteService walking directions (stdlib HTTP, key from the environment). |
 | `secrets.py` | Secrets from the environment (systemd `EnvironmentFile`) or `bridge/.env`. |
@@ -247,7 +250,8 @@ real pad.
 ## Config
 
 - Non-secret settings: [config.toml](config.toml): `[safety]` limits, `[ble]` address/protocol/timeouts,
-  `[server]` listen address, control and CORS rules, grace period, `[storage]` database, `[udp]` output.
+  `[server]` listen address, control and CORS rules, grace period, `[storage]` database, `[udp]` output,
+  `[google_3d]` 3D tiles session limits (25/day, 900/month).
 - Secrets: `bridge/.env` (git-ignored). See `.env.example`.
 
 ## Service: what was verified on the owner's pad (2026-09-30)

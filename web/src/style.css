@@ -97,6 +97,18 @@ button:disabled { cursor: not-allowed; opacity: 0.45; }
 .yt-pick { flex: 1; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .yt-del { padding: 5px 8px !important; }
 
+/* --- real world (CesiumJS + Google 3D tiles) --------------------------------------------- */
+.real-world { position: absolute; inset: 0; background: #0b0f14; }
+.real-cesium { position: absolute; inset: 0; }
+.real-cesium .cesium-widget, .real-cesium .cesium-viewer { width: 100%; height: 100%; }
+/* Google's attribution must stay visible: top left, clear of the walker, HUD and controls. */
+.real-cesium .cesium-viewer-bottom { top: 52px; bottom: auto; left: 14px; right: auto; padding: 2px 6px;
+  background: rgb(0 0 0 / 0.45); border-radius: 6px; }
+.real-note {
+  position: absolute; left: 50%; top: 45%; transform: translate(-50%, -50%); max-width: min(90vw, 520px);
+  padding: 14px 18px; border-radius: 12px; background: var(--panel); border: 1px solid var(--line); text-align: center;
+}
+
 /* --- HUD --------------------------------------------------------------------------------- */
 .hud {
   position: absolute; top: 56px; left: 50%; transform: translateX(-50%);
@@ -216,6 +228,7 @@ button:disabled { cursor: not-allowed; opacity: 0.45; }
 .tile { display: flex; flex-direction: column; gap: 2px; padding: 14px; border: 1px solid var(--surface-line); border-radius: 12px; }
 .tile .label { font-size: 13px; color: var(--surface-ink-2); }
 .tile .big { font-size: 32px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.tile .big .of { font-size: 18px; font-weight: 500; color: var(--surface-ink-2); }
 .segmented { display: inline-flex; border: 1px solid var(--surface-line); border-radius: 8px; overflow: hidden; margin-bottom: 8px; }
 .segmented button { border: 0; padding: 6px 14px; background: none; color: var(--surface-ink-2); }
 .segmented button[aria-selected='true'] { background: var(--surface-line); color: var(--surface-ink); font-weight: 600; }

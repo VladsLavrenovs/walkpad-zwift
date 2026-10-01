@@ -1,6 +1,6 @@
 /** Stats page: streaks and bests, distance per day/week/month, and the session history. */
 
-import type { BridgeClient, Best, Session, Stats } from './bridge'
+import type { BridgeClient, Best, Session, Stats, Tiles3dUsage } from './bridge'
 import { type Bar, barChart } from './charts'
 import { fmtDate, fmtDistance, fmtDuration, fmtSpeed } from './format'
 
@@ -76,9 +76,13 @@ export class StatsPage {
     this.el.hidden = false
     this.el.innerHTML = '<p class="muted">Loading…</p>'
     try {
-      const [stats, sessions] = await Promise.all([this.bridge.stats(), this.bridge.sessions(100)])
+      const [stats, sessions, tiles] = await Promise.all([
+        this.bridge.stats(),
+        this.bridge.sessions(100),
+        this.bridge.tiles3dUsage().catch(() => null), // an older bridge has no cost guard
+      ])
       this.stats = stats
-      this.render(stats, sessions.sessions, sessions.total)
+      this.render(stats, sessions.sessions, sessions.total, tiles)
     } catch (err) {
       this.el.innerHTML = `<p class="error">Could not load stats: ${String(err)}</p>`
     }
@@ -88,7 +92,7 @@ export class StatsPage {
     this.el.hidden = true
   }
 
-  private render(stats: Stats, sessions: Session[], total: number): void {
+  private render(stats: Stats, sessions: Session[], total: number, tiles: Tiles3dUsage | null): void {
     const s = stats.streaks
     const pb = stats.personal_bests
     const all = stats.all_time
@@ -101,6 +105,9 @@ export class StatsPage {
           <span class="muted">days (≥ ${Math.round(s.active_day_min_s / 60)} min each)</span></div>
         <div class="tile"><span class="label">All time</span><span class="big">${fmtKm(all.distance_m)}</span>
           <span class="muted">${all.sessions} session${all.sessions === 1 ? '' : 's'} · ${fmtDuration(all.duration_s)}</span></div>
+        ${tiles ? `<div class="tile"><span class="label">3D world sessions (Google)</span>
+          <span class="big">${tiles.today}<span class="of"> / ${tiles.per_day}</span></span>
+          <span class="muted">today · ${tiles.this_month} / ${tiles.per_month} this month</span></div>` : ''}
       </div>
       <h2>Distance</h2>
       <div class="segmented" role="tablist"></div>

@@ -51,3 +51,10 @@ min_session_s = 10.0
 enabled = false
 host = ""
 port = 5005
+
+[google_3d]
+# Cost guard: Google Photorealistic 3D Tiles sessions the bridge grants to the web app's
+# "Real world" world. Above either limit the app falls back to the placeholder world.
+# 0 disables the 3D world.
+max_sessions_per_day = 25
+max_sessions_per_month = 900

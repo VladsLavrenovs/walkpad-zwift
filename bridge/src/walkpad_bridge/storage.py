@@ -64,9 +64,19 @@ CREATE TABLE IF NOT EXISTS routes (
     last_walked_at REAL,
     completed_at   REAL
 );
+
+-- v4: granted Google 3D tiles sessions, for the cost guard (tiles3d.py).
+CREATE TABLE IF NOT EXISTS tiles3d_sessions (
+    id         INTEGER PRIMARY KEY,
+    granted_at REAL NOT NULL,
+    day        TEXT NOT NULL,  -- local YYYY-MM-DD
+    month      TEXT NOT NULL,  -- local YYYY-MM
+    client     TEXT
+);
+CREATE INDEX IF NOT EXISTS tiles3d_sessions_month ON tiles3d_sessions (month, day);
 """
-# v1 -> v2 -> v3 only add tables, which CREATE ... IF NOT EXISTS does on open.
-SCHEMA_VERSION = 3
+# v1 -> v4 only add tables, which CREATE ... IF NOT EXISTS does on open.
+SCHEMA_VERSION = 4
 DEFAULT_PACE_KMH = 4.5
 VIDEO_FIELDS = ("title", "pace_kmh", "position_s")
 
@@ -291,6 +301,32 @@ class Store:
 
     def delete_route(self, id: int) -> bool:
         return self.db.execute("DELETE FROM routes WHERE id = ?", (id,)).rowcount > 0
+
+    # --- Google 3D tiles sessions (cost guard) -------------------------------------------------
+
+    def count_tiles_sessions(self, day: str, month: str) -> tuple[int, int]:
+        row = self.db.execute(
+            "SELECT COALESCE(SUM(day = ?), 0), COUNT(*) FROM tiles3d_sessions WHERE month = ?",
+            (day, month),
+        ).fetchone()
+        return int(row[0]), int(row[1])
+
+    def grant_tiles_session(
+        self, now: float, day: str, month: str, per_day: int, per_month: int, client: str | None
+    ) -> tuple[bool, str | None, int, int]:
+        """Count and grant in one transaction. (granted, refusal reason, today, this month)"""
+        with self.db:
+            self.db.execute("BEGIN IMMEDIATE")
+            today, this_month = self.count_tiles_sessions(day, month)
+            if this_month >= per_month:
+                return False, "month", today, this_month
+            if today >= per_day:
+                return False, "day", today, this_month
+            self.db.execute(
+                "INSERT INTO tiles3d_sessions (granted_at, day, month, client) VALUES (?, ?, ?, ?)",
+                (now, day, month, client),
+            )
+        return True, None, today + 1, this_month + 1
 
     def finished_sessions(self) -> list[dict[str, Any]]:
         rows = self.db.execute("SELECT * FROM sessions WHERE ended_at IS NOT NULL ORDER BY started_at")

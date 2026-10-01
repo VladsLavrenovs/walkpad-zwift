@@ -118,6 +118,15 @@ export interface Video {
   last_played_at: number | null
 }
 
+export interface Tiles3dUsage {
+  day: string
+  month: string
+  today: number
+  this_month: number
+  per_day: number
+  per_month: number
+}
+
 export class ControlError extends Error {
   readonly status: number
 
@@ -281,6 +290,23 @@ export class BridgeClient {
 
   deleteVideo(id: number): Promise<void> {
     return this.write('DELETE', `/videos/${id}`)
+  }
+
+  // --- Google 3D tiles cost guard -----------------------------------------------------------
+
+  /** Ask the bridge before creating a Google 3D tiles session (each one costs money). */
+  async request3dSession(): Promise<{ granted: boolean; message: string; usage: Tiles3dUsage | null }> {
+    const res = await fetch(this.url('/tiles3d/session'), {
+      method: 'POST',
+      headers: this.client ? { 'X-Client-Id': this.client } : {},
+    })
+    const data = (await res.json().catch(() => ({}))) as { granted?: boolean; detail?: string; usage?: Tiles3dUsage }
+    if (res.ok && data.granted) return { granted: true, message: 'granted', usage: data.usage ?? null }
+    return { granted: false, message: data.detail ?? `3D world unavailable (HTTP ${res.status})`, usage: data.usage ?? null }
+  }
+
+  tiles3dUsage(): Promise<Tiles3dUsage> {
+    return this.get<Tiles3dUsage>('/tiles3d/usage')
   }
 
   // --- routes -------------------------------------------------------------------------------

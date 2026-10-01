@@ -41,6 +41,8 @@ possible. Tick them off there.
 - [ ] Walk through a village, farmlands, a castle town (through the gate), the waterfall valley:
       buildings look right (no gaps between wall pieces, doors and windows in place, roofs on),
       windmill sails turn, waterfalls flow downwards.
+- [ ] Time "fixed time": the picker appears; the chosen hour (e.g. 21:30, 07:00) shows at once and
+      stays, also after a reload.
 - [ ] At night (or "real time" after dark): windows and lanterns glow, stars, fireflies; with
       quality high there is a soft bloom around lights.
 - [ ] "⟳ New world" in the fantasy toolbar: pick a starting biome, Generate: a new path and

@@ -265,7 +265,30 @@ export function rainAt(seed: number, s: number, w: Weights): number {
 export const CYCLE_MINUTES = 24 // a full day passes in 24 real minutes (1 min = 1 h)
 
 /** Hour of the day [0, 24): following real local time, or the accelerated cycle. */
-export function hourOfDay(mode: 'cycle' | 'real', nowMs: number, cycleStartHour = 9): number {
+/** cycle: 24 minutes per day; real: local clock time; fixed: always the chosen hour. */
+export type TimeMode = 'cycle' | 'real' | 'fixed'
+
+export function isTimeMode(value: unknown): value is TimeMode {
+  return value === 'cycle' || value === 'real' || value === 'fixed'
+}
+
+/** "HH:MM" (an <input type="time"> value) as an hour [0, 24); null if malformed. */
+export function parseClock(text: string | null | undefined): number | null {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(text?.trim() ?? '')
+  if (!m) return null
+  const h = Number(m[1])
+  const min = Number(m[2])
+  return h < 24 && min < 60 ? h + min / 60 : null
+}
+
+/** An hour [0, 24) as "HH:MM". */
+export function formatClock(hour: number): string {
+  const total = Math.round((((hour % 24) + 24) % 24) * 60) % (24 * 60)
+  return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`
+}
+
+export function hourOfDay(mode: TimeMode, nowMs: number, cycleStartHour = 9, fixedHour = 12): number {
+  if (mode === 'fixed') return ((fixedHour % 24) + 24) % 24
   if (mode === 'real') {
     const d = new Date(nowMs)
     return d.getHours() + d.getMinutes() / 60 + d.getSeconds() / 3600

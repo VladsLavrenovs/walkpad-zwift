@@ -136,7 +136,8 @@ own ~700 KB chunk, plus ~2 MB of models and textures from `public/worlds/fantasy
   kit's hand-painted textures and normal maps.
 - **Sky and light**: a sky dome with sun, moon, twinkling stars and drifting clouds; the sky also
   lights the scene (image-based light, refreshed every 3 s) and reflects in the water. A
-  **day/night cycle** (24 real minutes per day, or "real time" from the toolbar): at night the
+  **day/night cycle** (24 real minutes per day, "real time" from your clock, or "fixed time": a
+  time of day you pick in the toolbar, e.g. always 21:30): at night the
   windows and lanterns glow and fireflies come out (the city is always at night). Per-biome fog,
   light rain in some 1.5 km zones.
 - **Plants** sway in the wind (a vertex shader on grass, crops, ferns and tree crowns).

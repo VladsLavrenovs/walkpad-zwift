@@ -47,7 +47,11 @@ import {
   fieldPatch,
   groundHeight,
   hashInts,
+  formatClock,
   hourOfDay,
+  isTimeMode,
+  parseClock,
+  type TimeMode,
   isStartBiome,
   nightness,
   noise2,
@@ -75,6 +79,7 @@ const HALF_LATERALS = [0.8, 1.6, 2.4, 3.4, 4.8, 6.5, 8.5, 11, 13.5, 16, 18.5, 21
 const LATERALS = [...HALF_LATERALS.map((l) => -l).reverse(), 0, ...HALF_LATERALS]
 const QUALITY_KEY = 'walkpad.fantasy.quality'
 const TIME_KEY = 'walkpad.fantasy.time'
+const CLOCK_KEY = 'walkpad.fantasy.clock'
 const FREE_SEED_KEY = 'walkpad.fantasy.seed'
 const FREE_START_KEY = 'walkpad.fantasy.start'
 const LAKE_LEVEL = -1.3
@@ -182,7 +187,9 @@ export class FantasyWorld implements World {
   private path: TrailPath | null = null
   private plan: BiomeSpan[] = []
   private quality: Quality = 'high'
-  private timeMode: 'cycle' | 'real' = 'cycle'
+  private timeMode: TimeMode = 'cycle'
+  /** The chosen hour for the 'fixed' time mode. */
+  private fixedHour = 21
   private heading = 0
   private haveHeading = false
   private rain!: THREE.LineSegments
@@ -209,7 +216,9 @@ export class FantasyWorld implements World {
   init(container: HTMLElement, ctx: WorldContext): void {
     this.ctx = ctx
     this.quality = (readKey(QUALITY_KEY) as Quality) in QUALITY ? (readKey(QUALITY_KEY) as Quality) : 'high'
-    this.timeMode = readKey(TIME_KEY) === 'real' ? 'real' : 'cycle'
+    const mode = readKey(TIME_KEY)
+    this.timeMode = isTimeMode(mode) ? mode : 'cycle'
+    this.fixedHour = parseClock(readKey(CLOCK_KEY)) ?? 21
     if (!ctx.obs) this.view = loadView()
     this.shownView = { ...this.view }
     this.root = document.createElement('div')
@@ -360,7 +369,8 @@ export class FantasyWorld implements World {
     bar.innerHTML = `
       <span class="fantasy-trail"></span>
       <label>quality <select class="fq"><option value="high">high</option><option value="medium">medium</option><option value="low">low</option></select></label>
-      <label>time <select class="ft"><option value="cycle">day cycle</option><option value="real">real time</option></select></label>
+      <label>time <select class="ft"><option value="cycle">day cycle</option><option value="real">real time</option><option value="fixed">fixed time</option></select>
+        <input type="time" class="fclock" step="300" aria-label="time of day"></label>
       <button type="button" class="fcam" hidden title="Back to the camera behind the walker (or double-click)">⟲ Reset camera</button>
       <span class="fantasy-hint muted">drag: turn · wheel/pinch: zoom</span>
       <button type="button" class="fn">⟳ New world</button>
@@ -373,10 +383,20 @@ export class FantasyWorld implements World {
     const ft = bar.querySelector<HTMLSelectElement>('.ft')!
     fq.value = this.quality
     ft.value = this.timeMode
+    const clock = bar.querySelector<HTMLInputElement>('.fclock')!
+    clock.value = formatClock(this.fixedHour)
+    clock.hidden = this.timeMode !== 'fixed'
+    clock.oninput = () => {
+      const hour = parseClock(clock.value)
+      if (hour === null) return
+      this.fixedHour = hour
+      writeKey(CLOCK_KEY, formatClock(hour))
+    }
     fq.onchange = () => this.setQuality(fq.value as Quality)
     ft.onchange = () => {
-      this.timeMode = ft.value === 'real' ? 'real' : 'cycle'
+      this.timeMode = isTimeMode(ft.value) ? ft.value : 'cycle'
       writeKey(TIME_KEY, this.timeMode)
+      clock.hidden = this.timeMode !== 'fixed'
     }
     const regen = bar.querySelector<HTMLDivElement>('.fantasy-regen')!
     const note = bar.querySelector<HTMLSpanElement>('.fantasy-regen-note')!
@@ -628,7 +648,7 @@ export class FantasyWorld implements World {
   }
 
   private atmosphere(s: number, w: Weights, dt: number, here: { x: number; z: number }): void {
-    const hour = hourOfDay(this.timeMode, Date.now())
+    const hour = hourOfDay(this.timeMode, Date.now(), 9, this.fixedHour)
     const night = Math.max(nightness(hour), w.city) // the city is always at night
     const sunUp = sunHeight(hour)
     const dusk = Math.max(0, 1 - Math.abs(sunUp) / 0.3) * (1 - w.city)
@@ -1040,7 +1060,7 @@ export class FantasyWorld implements World {
     const info = this.renderer.info.render
     const biome = dominantBiome(w)
     const mix = BIOMES.filter((b) => w[b] > 0.01).map((b) => `${b} ${(w[b] * 100).toFixed(0)}%`).join(', ')
-    const hour = hourOfDay(this.timeMode, Date.now())
+    const hour = hourOfDay(this.timeMode, Date.now(), 9, this.fixedHour)
     const next = this.plan.find((sp) => sp.start > s)
     this.debugEl.textContent = [
       `seed ${this.trail?.seed}  ·  start ${this.trail?.start}  ·  ${this.trail?.name}`,

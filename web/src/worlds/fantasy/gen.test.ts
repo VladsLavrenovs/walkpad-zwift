@@ -13,7 +13,9 @@ import {
   fieldPatch,
   groundHeight,
   house,
+  formatClock,
   hourOfDay,
+  parseClock,
   nightness,
   noise2,
   rainAt,
@@ -148,6 +150,10 @@ describe('weather and time', () => {
     expect(hourOfDay('cycle', 15 * 60_000, 9)).toBeCloseTo(0, 6)
     const noonLocal = new Date(2026, 9, 1, 12, 30).getTime()
     expect(hourOfDay('real', noonLocal)).toBeCloseTo(12.5, 6)
+    // A fixed clock time: always that hour, whatever the clock says.
+    expect(hourOfDay('fixed', noonLocal, 9, 21.5)).toBe(21.5)
+    expect(hourOfDay('fixed', 0, 9, 21.5)).toBe(21.5)
+    expect(hourOfDay('fixed', 0, 9, 24)).toBe(0)
     expect(nightness(12)).toBe(0)
     expect(nightness(0)).toBe(1)
     expect(nightness(6.5)).toBeGreaterThan(0)
@@ -265,5 +271,18 @@ describe('starting somewhere else', () => {
     const plan = biomePlan(12, 10_000, 10_000, 'castle')
     const gate = structures(12, plan, 0, plan[0].end).find((s) => s.kind === 'gate' && s.lateral === 0)
     expect(gate!.s).toBeLessThan(300)
+  })
+})
+
+describe('clock time', () => {
+  it('reads and writes HH:MM', () => {
+    expect(parseClock('21:30')).toBe(21.5)
+    expect(parseClock('7:05')).toBeCloseTo(7 + 5 / 60, 9)
+    expect(parseClock('00:00')).toBe(0)
+    for (const bad of ['24:00', '12:60', 'noon', '', null]) expect(parseClock(bad)).toBeNull()
+    expect(formatClock(21.5)).toBe('21:30')
+    expect(formatClock(7 + 5 / 60)).toBe('07:05')
+    expect(formatClock(23.999)).toBe('00:00')
+    expect(parseClock(formatClock(18.25))).toBe(18.25)
   })
 })

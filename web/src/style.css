@@ -121,6 +121,7 @@ button:disabled { cursor: not-allowed; opacity: 0.45; }
 .fantasy-toolbar > * { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 3px 8px; color: var(--ink-2); }
 .fantasy-toolbar select { background: transparent; color: var(--ink); border: 0; font: inherit; }
 .fantasy-toolbar select option { background: #1b2430; }
+.fantasy-toolbar input[type='time'] { background: transparent; color: var(--ink); border: 0; font: inherit; color-scheme: dark; }
 .fantasy-trail { color: var(--ink) !important; }
 .fantasy-world { touch-action: none; cursor: grab; }
 .fantasy-world.dragging { cursor: grabbing; }

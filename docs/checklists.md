@@ -55,6 +55,16 @@ possible. Tick them off there.
       towards houses keeps the camera out of them.
 - [ ] No visible stutter when new streets appear ahead (debug panel: "build ≤ … ms" stays under ~20).
 
+## Open world, milestone 1a (world map)
+
+- [ ] **Map** (top bar) shows a continent within a couple of seconds; Generate / Random give
+      different worlds; the seed is remembered.
+- [ ] The world looks natural: coasts with bays and islands, mountains, rivers running to the
+      sea, lakes, waterfalls, towns by rivers, castles on hills, roads with bridges, provinces.
+- [ ] Zooming in shows the smaller places' names; the arrow keys do not move the map (they
+      still change the belt speed, as everywhere).
+- [ ] Back to walking: the other worlds (Fantasy trail, YouTube, ...) are unchanged.
+
 ## Prompt 8 (Cloudflare: Workers deploy, Tunnel, Access) — setup: [cloudflare.md](cloudflare.md)
 
 - [ ] `walkpad-tunnel` service active and the tunnel **Healthy** in the dashboard; it comes back

@@ -36,6 +36,9 @@ export class App {
   private readonly controls: Controls | null
   private readonly stats: StatsPage | null
   private readonly routesPage: RoutesPage | null
+  /** #/worldmap: the open world's map, loaded on first visit (its own lazy chunk). */
+  private worldMap: { show(): void; hide(): void } | null = null
+  private worldMapLoading = false
   private readonly minimap: Minimap
   private readonly routeTracker = new RouteTracker()
   private world: World | null = null
@@ -75,6 +78,7 @@ export class App {
         <label class="world-menu">World <select></select></label>
         <a class="link" href="#/routes">Routes</a>
         <a class="link" href="#/stats">Stats</a>
+        <a class="link" href="#/worldmap">Map</a>
       </div>
       <div class="banner" role="alert" hidden></div>
       <div class="toast" role="status" hidden></div>`
@@ -164,11 +168,27 @@ export class App {
   private route(): void {
     const onStats = location.hash === '#/stats' && this.stats !== null
     const onRoutes = location.hash === '#/routes' && this.routesPage !== null
-    this.root.classList.toggle('on-stats', onStats || onRoutes)
+    const onWorldMap = location.hash === '#/worldmap' && !this.config.obs
+    this.root.classList.toggle('on-stats', onStats || onRoutes || onWorldMap)
+    if (onWorldMap) this.showWorldMap()
+    else this.worldMap?.hide()
     if (onStats) void this.stats!.show()
     else this.stats?.hide()
     if (onRoutes) void this.routesPage!.show()
     else this.routesPage?.hide()
+  }
+
+  private showWorldMap(): void {
+    if (this.worldMap) {
+      this.worldMap.show()
+      return
+    }
+    if (this.worldMapLoading) return
+    this.worldMapLoading = true
+    void import('./worlds/openworld/mappage').then(({ WorldMapPage }) => {
+      this.worldMap = new WorldMapPage(this.root)
+      if (location.hash === '#/worldmap') this.worldMap.show()
+    }).catch((err) => this.toast(`World map failed to load: ${String(err)}`, 8000))
   }
 
   private readonly frame = (now: number): void => {

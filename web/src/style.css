@@ -222,6 +222,34 @@ button:disabled { cursor: not-allowed; opacity: 0.45; }
 /* --- stats page -------------------------------------------------------------------------- */
 .on-stats > .world, .on-stats > .walker, .on-stats > .hud, .on-stats > .topbar, .on-stats > .minimap { visibility: hidden; }
 .on-stats .yt-toolbar, .on-stats .yt-panel { display: none; }
+
+/* --- World map (open world) --------------------------------------------------------------- */
+.worldmap-page { position: absolute; inset: 0; z-index: 30; display: flex; flex-direction: column; background: #0f1620; }
+.worldmap-page header { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 10px 16px; }
+.worldmap-page h1 { font-size: 18px; margin: 0 8px 0 0; }
+.worldmap-page header .link { margin-left: auto; }
+.worldmap-page .wm-seed { width: 110px; }
+.wm-info { font-size: 13px; }
+.wm-map { flex: 1; }
+.wm-map.leaflet-container { background: #1c3d63; }
+.wm-place { white-space: nowrap; pointer-events: auto; }
+.wm-place i { position: absolute; transform: translate(-50%, -50%); font-style: normal; text-shadow: 0 0 3px #fff, 0 0 2px #fff; color: #2b2017; }
+.wm-place span { position: absolute; left: 8px; top: -8px; font: 600 12px/1.2 system-ui, sans-serif; color: #24180f;
+  text-shadow: 0 0 3px #f4ecd8, 0 0 3px #f4ecd8, 0 0 2px #f4ecd8; }
+.wm-city i { font-size: 15px; }
+.wm-city span { font-size: 15px; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase; }
+.wm-castle i { font-size: 16px; color: #5a2d5c; }
+.wm-ruins i { color: #3d5f6b; }
+.wm-waterfall i { color: #1f5f9a; font-weight: 700; }
+.wm-windmill i { color: #7b5733; }
+.wm-village i { font-size: 10px; }
+.wm-far .wm-place:not(.wm-city) span, .wm-mid .wm-place.wm-ruins span, .wm-mid .wm-place.wm-windmill span, .wm-mid .wm-place.wm-waterfall span { display: none; }
+.wm-far .wm-place.wm-windmill, .wm-far .wm-place.wm-ruins, .wm-far .wm-place.wm-waterfall { display: none; }
+.wm-province span { position: absolute; transform: translate(-50%, -50%); white-space: nowrap; font: italic 600 14px/1 Georgia, serif;
+  letter-spacing: 0.18em; text-transform: uppercase; color: rgb(70 30 72 / 0.55); text-shadow: 0 0 4px rgb(255 255 255 / 0.5); pointer-events: none; }
+.wm-legend { background: rgb(255 255 255 / 0.9); color: #222; padding: 8px 10px; border-radius: 6px; font: 12px/1.6 system-ui, sans-serif; }
+.wm-legend b { display: inline-block; width: 14px; height: 10px; margin-right: 6px; vertical-align: middle; border-radius: 2px; }
+.wm-legend i { display: inline-block; width: 14px; margin-right: 6px; text-align: center; font-style: normal; }
 .stats-page, .routes-page {
   position: absolute; inset: 0; overflow: auto; padding: 20px max(16px, calc(50vw - 460px)) 180px;
   background: var(--surface-1); color: var(--surface-ink); color-scheme: light dark;

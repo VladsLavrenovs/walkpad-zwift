@@ -194,6 +194,51 @@ texture downscaling).
 New dependency: `three` (three.js, the standard WebGL library; named in the brief). Post-processing
 (bloom) uses three's own addons, nothing new.
 
+## Open world (in progress)
+
+A separate mode, built in milestones (plan: owner-approved). It does not change the other
+worlds: its code is `src/worlds/openworld/`, loaded only when used.
+
+**Milestone 1a, done: the continent generator and the world map.** Open **Map** in the top bar
+(`#/worldmap`): the whole continent of a seed, nothing hidden, with a seed field, Generate and
+Random. Generation runs in a Web Worker (about 1 s).
+
+- **Shape:** an island continent on a 10 x 10 km map. Noise shapes the land (bays, peninsulas,
+  offshore islands, inland seas); the sea level is chosen so every seed has about 47 % land;
+  open sea all round the edge.
+- **Terrain:** lowland roll and hills, mountain ranges from ridged noise with snow on the peaks.
+- **Water:** lakes where basins hold water (priority flood: flat at their spill level), rivers
+  where enough rain gathers (flow accumulation, downhill to the sea or a lake, wider
+  downstream), waterfalls where a river drops steeply (some straight off a sea cliff).
+- **Biomes** follow the land, with smooth borders: highlands and rock on high or steep ground,
+  dark forest where it is moist, lakeside meadows in damp lowlands, farmland on dry flat
+  lowland, elven ruins in old-forest lands. New biomes are new score functions
+  (`continent/climate.ts`).
+- **Places,** each where it makes sense: villages on flat land near fresh water, the three best
+  as cities; castles on hills that stand out; ruins in the elven lands; windmills near villages;
+  waterfalls. All with generated names.
+- **Provinces** around the cities and far-off castles, with wandering borders, named after
+  their capitals.
+- **Roads** between all towns and castles (minimum spanning tree plus shortcuts, A* over a cost
+  grid of slope and water), with bridges over rivers. Every town is on the network.
+- **The map:** Leaflet in "simple" coordinates (metres), terrain tiles drawn from the generator
+  (biome colours, hill shading, sea depth, lakes, province borders at pixel precision), with
+  rivers, roads, bridges, places and province names on top; smaller places' names appear as
+  you zoom in; legend and scale bar. Arrow keys never pan it (they are belt speed).
+
+Next (1b): walking the continent in 3D: steering with A/D, position saved on the bridge.
+
+| Module | Role |
+|---|---|
+| `openworld/continent/terrain.ts` | Land shape and relief |
+| `openworld/continent/hydro.ts` | Lakes, flow, rivers, waterfalls |
+| `openworld/continent/climate.ts` | Moisture and biome weights |
+| `openworld/continent/places.ts`, `names.ts` | Settlements, points of interest, names, provinces |
+| `openworld/continent/roads.ts`, `smooth.ts` | Road network, curve smoothing |
+| `openworld/continent/index.ts` | `generateContinent(seed)`, sampling helpers; unit-tested (`continent.test.ts`) |
+| `openworld/continent/worker.ts` | Runs the generator off the main thread |
+| `openworld/mapdraw.ts`, `mappage.ts` | The world map page |
+
 ## Real world (3D) world
 
 Google Photorealistic 3D Tiles in CesiumJS, following the active route. Off unless

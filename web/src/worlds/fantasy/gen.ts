@@ -150,18 +150,20 @@ const NEXT: Record<Natural, Natural[]> = {
   falls: ['forest', 'meadow', 'ruins'],
 }
 /** Span length range per biome, metres. */
+/** Span length range per biome, metres: a new biome every 10-20 minutes at walking pace. */
 const SPAN_M: Record<Natural, [number, number]> = {
-  forest: [1600, 3200],
-  ruins: [1200, 2400],
-  meadow: [1500, 3000],
-  fields: [1500, 2800],
-  village: [700, 1300],
-  castle: [800, 1100],
-  falls: [1400, 2600],
+  forest: [800, 1400],
+  ruins: [650, 1100],
+  meadow: [700, 1300],
+  fields: [700, 1300],
+  village: [450, 800],
+  castle: [600, 800],
+  falls: [700, 1300],
 }
 
 export const BLEND_M = 250
 const CITY_MIN_M = 1500
+const MIN_BEFORE_CITY_M = 400
 
 export interface BiomeSpan {
   biome: Biome
@@ -200,8 +202,11 @@ export function biomePlan(seed: number, length: number | null, upTo: number, sta
         }
       }
     }
-    const [lo, hi] = biome === 'city' ? [1500, 2500] : spans.length === 0 ? [900, 1700] : SPAN_M[biome as Natural]
-    const len = lo + r() * (hi - lo)
+    const [lo, hi] = biome === 'city' ? [900, 1500] : spans.length === 0 ? [500, 900] : SPAN_M[biome as Natural]
+    let len = lo + r() * (hi - lo)
+    // Never leave a sliver before the city: it would be shorter than the blend, and the world
+    // would switch biomes abruptly there. Run this span on to the city instead.
+    if (s + len > cityStart - MIN_BEFORE_CITY_M) len = cityStart - s
     lastSeen.set(biome, spans.length)
     spans.push({ biome, start: s, end: Math.min(s + len, cityStart) })
     s += len

@@ -117,7 +117,8 @@ own ~700 KB chunk, plus ~2 MB of models and textures from `public/worlds/fantasy
   more than ~35° off course), generated ahead (200-420 m by quality) and disposed 60 m behind.
   At most one piece of work per frame: a chunk's terrain and plants, or (a frame later) its
   buildings.
-- **Biomes** in seeded stretches (villages and castle towns ~1 km, the rest 1.5-3 km) that follow
+- **Biomes** in seeded stretches (the first 0.5-0.9 km, villages 0.45-0.8 km, castle towns 0.6-0.8 km,
+  the rest 0.65-1.4 km: a new biome every 10-20 minutes at walking pace) that follow
   sensible neighbours and prefer ones not seen for a while, blended over 250 m:
   - **Dark forest**: dense pines, oaks, birches, ferns, mushrooms, dim light, green fog.
   - **Misty elven ruins**: ruined stone houses with ivy, archways over the path, pillars, glowing crystals.
@@ -141,6 +142,10 @@ own ~700 KB chunk, plus ~2 MB of models and textures from `public/worlds/fantasy
   windows and lanterns glow and fireflies come out (the city is always at night). Per-biome fog,
   light rain in some 1.5 km zones.
 - **Plants** sway in the wind (a vertex shader on grass, crops, ferns and tree crowns).
+- **Free walk** (no active route): the world of this browser (`walkpad.fantasy.seed`), and where
+  you have got to in it is remembered in this browser too, so each walk continues where the last
+  one ended (a new world from "New world" starts at 0). The debug panel shows the next biome and
+  how far it is.
 - **Trails**: named, fixed-length (Routes page → "New fantasy trail", or a preset), starting in a
   chosen or random biome. They are routes without a map, so progress persists across sessions
   exactly like routes.
@@ -176,6 +181,7 @@ own ~700 KB chunk, plus ~2 MB of models and textures from `public/worlds/fantasy
 | `fantasy/gen.ts` | Pure generation: seeded RNG and noise, `TrailPath`, biome plan and blending, terrain heights, field patchwork, rain, time of day, quality presets, prop scatter, buildings (`house()`, `tower()`, `ruin()`, castles) and waterfalls. Unit-tested. |
 | `fantasy/assets.ts` | The kit: loads models and textures, materials, procedural pieces (foundations, battlements, lanterns, windmill, archway), baking a chunk's buildings. |
 | `fantasy/props.ts` | Scattered props: stylised trees, grass, crops, rocks, village props (procedural), kit models. |
+| `fantasy/freewalk.ts` | Free-walk position kept per browser across page loads. Unit-tested. |
 | `fantasy/orbit.ts` | The user camera: orbit/zoom maths, walker sprite placement, keeping out of buildings. Unit-tested. |
 | `fantasy/shaders.ts` | Wind sway, sky dome, textured ground (noise, cobbles, cliff rock), waterfalls, glowing particles. |
 | `fantasy/world.ts` | three.js scene, chunk streaming, lights, fog, rain, bloom, camera, toolbar, debug panel. |

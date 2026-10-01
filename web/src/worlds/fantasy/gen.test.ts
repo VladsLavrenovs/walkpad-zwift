@@ -80,6 +80,10 @@ describe('biomes', () => {
     expect(plan.at(-1)!.start).toBeCloseTo(30_000 - 4500, 0) // 15 % of 30 km
     for (let i = 1; i < plan.length - 1; i++) expect(plan[i].biome).not.toBe(plan[i - 1].biome)
     for (const sp of plan.slice(0, -1)) expect(sp.end - sp.start).toBeLessThanOrEqual(4500)
+    // Every span is long enough to blend in and out (no sliver before the city).
+    for (const seed of [1, 7, 9, 42, 4242, 31337]) {
+      for (const sp of biomePlan(seed, 20_000, 20_000)) expect(sp.end - sp.start, `seed ${seed}`).toBeGreaterThanOrEqual(BLEND_M)
+    }
   })
 
   it('a short trail still gets the city at the end', () => {

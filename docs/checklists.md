@@ -37,7 +37,9 @@ possible. Tick them off there.
       walking (debug panel: press `` ` ``); if not, medium/low do.
 - [ ] Create a trail (Routes page, a preset), walk it a few minutes, stop, walk again later:
       the same scenery at the same place, progress continues.
-- [ ] Biomes change every 1-3 km; rain and the day/night cycle look right; the city at the end.
+- [ ] Free walk (no active route): walk a few minutes, reload or come back later: the world continues
+      at the same place (debug panel: `s`), and the next biome arrives within ~1.4 km.
+- [ ] Biomes change every 0.5-1.4 km; rain and the day/night cycle look right; the city at the end.
 - [ ] Walk through a village, farmlands, a castle town (through the gate), the waterfall valley:
       buildings look right (no gaps between wall pieces, doors and windows in place, roofs on),
       windmill sails turn, waterfalls flow downwards.

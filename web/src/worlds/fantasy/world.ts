@@ -65,6 +65,7 @@ import {
 } from './gen'
 import { BUILDING_MODELS, Kit, MODEL_FOR, bake, millBlades } from './assets'
 import { type Box, DEFAULT_VIEW, type OrbitView, clampView, clearance, isDefaultView, orbitPose, walkerPlacement } from './orbit'
+import { FreeWalkProgress } from './freewalk'
 import { PropLibrary } from './props'
 import { CLOCK, SkyDome, glowPointsMaterial, groundMaterial, noiseTexture, rippleNormals, waterfallMaterial } from './shaders'
 
@@ -211,6 +212,8 @@ export class FantasyWorld implements World {
   private pointers = new Map<number, { x: number; y: number }>()
   /** Building footprints near the walker (for the camera), refreshed every 20 m. */
   private nearBuildings: { s: number; boxes: Box[] } = { s: Number.NaN, boxes: [] }
+  /** Where a free walk has got to, kept in this browser across page loads. */
+  private free = new FreeWalkProgress({ get: readKey, set: writeKey })
   private pinch = 0
 
   init(container: HTMLElement, ctx: WorldContext): void {
@@ -527,6 +530,7 @@ export class FantasyWorld implements World {
     }
     writeKey(FREE_SEED_KEY, String(seed))
     writeKey(FREE_START_KEY, start)
+    this.free.reset(`free:${seed}:${start}`)
   }
 
   private setQuality(q: Quality): void {
@@ -570,6 +574,7 @@ export class FantasyWorld implements World {
     this.plan = biomePlan(trail.seed, trail.length, (trail.length ?? 0) + 500_000, trail.start)
     this.haveHeading = false
     this.nearBuildings = { s: Number.NaN, boxes: [] }
+    if (trail.routeId === null) this.free.use(trail.key)
     this.clearChunks()
     const label = this.toolbar?.querySelector('.fantasy-trail')
     if (label) label.textContent = trail.length ? `${trail.name} · ${(trail.length / 1000).toFixed(1)} km` : trail.name
@@ -582,7 +587,9 @@ export class FantasyWorld implements World {
     const trail = this.currentTrail()
     if (trail.key !== this.trail?.key) this.useTrail(trail)
     const path = this.path!
-    const s = Math.max(0, trail.length ? Math.min(distanceM, trail.length) : distanceM)
+    // A trail's position comes from the bridge (persisted per route); a free walk continues
+    // from where this browser left it.
+    const s = Math.max(0, trail.length ? Math.min(distanceM, trail.length) : this.free.position(distanceM))
     this.fps += ((dt > 0 ? 1 / dt : 60) - this.fps) * 0.05
     CLOCK.value += Math.min(dt, 0.1)
 
@@ -845,11 +852,14 @@ export class FantasyWorld implements World {
     add(ground, g)
 
     // Water: lakes in the meadows, the river in the waterfall valley.
-    const mid = biomeWeights(this.plan, s0 + CHUNK_M / 2)
-    if (mid.meadow > 0.2) {
+    // Wherever the biome has any weight in this stretch: the water then shows up gradually, as
+    // the ground sinks below it, instead of starting with a straight edge at a chunk boundary.
+    const ends = [biomeWeights(this.plan, s0), biomeWeights(this.plan, s1)]
+    const mid = { meadow: Math.max(...ends.map((w) => w.meadow)), falls: Math.max(...ends.map((w) => w.falls)) }
+    if (mid.meadow > 0) {
       for (const side of [-1, 1]) add(...this.waterStrip(s0, s1, side * 9, side * TERRAIN_HALF_WIDTH_M, LAKE_LEVEL))
     }
-    if (mid.falls > 0.15) add(...this.waterStrip(s0, s1, RIVER.lat0 - 0.4, RIVER.lat1 + 0.6, RIVER.level))
+    if (mid.falls > 0) add(...this.waterStrip(s0, s1, RIVER.lat0 - 0.4, RIVER.lat1 + 0.6, RIVER.level))
     for (const fall of waterfalls(seed, this.plan, s0, s1)) this.addWaterfall(chunk, fall.s, fall.side, fall.width)
 
     // Props: one InstancedMesh per part per kind, keeping out of the buildings nearby.

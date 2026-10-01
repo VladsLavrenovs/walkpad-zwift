@@ -50,6 +50,9 @@ export class Walker {
   private shown = -1
   private z = 1
   private fadeTimer: ReturnType<typeof setTimeout> | null = null
+  /** Offset and scale from the normal spot (a world with a movable camera sets it). */
+  private placement = { dx: 0, dy: 0, scale: 1, shown: true }
+  private wanted = true
 
   constructor(parent: HTMLElement, base = import.meta.env.BASE_URL) {
     this.el = document.createElement('div')
@@ -70,14 +73,24 @@ export class Walker {
   }
 
   set visible(on: boolean) {
-    this.el.hidden = !on
+    this.wanted = on
+    this.el.hidden = !(on && this.placement.shown)
+  }
+
+  /** Move/scale the sprite from its normal spot (pixels; scale about the feet), or hide it (null). */
+  place(p: { dx: number; dy: number; scale: number } | null): void {
+    this.placement = p ? { ...p, shown: true } : { dx: 0, dy: 0, scale: 1, shown: false }
+    this.el.hidden = !(this.wanted && this.placement.shown)
   }
 
   update(stepsPerSecond: number, speedKmh: number, dt: number): void {
     this.gait.advance(stepsPerSecond, dt)
     this.show(this.gait.frame())
-    const bob = this.gait.bob(speedKmh) * this.el.clientHeight
-    this.el.style.transform = `translate(-50%, ${(-bob).toFixed(2)}px)`
+    const { dx, dy, scale } = this.placement
+    const bob = this.gait.bob(speedKmh) * this.el.clientHeight * scale
+    this.el.style.transform = scale === 1 && dx === 0 && dy === 0
+      ? `translate(-50%, ${(-bob).toFixed(2)}px)`
+      : `translate(calc(-50% + ${dx.toFixed(1)}px), ${(dy - bob).toFixed(1)}px) scale(${scale.toFixed(4)})`
   }
 
   private show(frame: number): void {

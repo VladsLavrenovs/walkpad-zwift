@@ -127,6 +127,13 @@ own ~700 KB chunk, plus ~2 MB of models and textures from `public/worlds/fantasy
   browser.
 - Same smooth motion and damped chase camera maths as the other worlds (7 m behind, 3.2 m up,
   looking 9 m ahead); the walker sprite stays.
+- **Camera**: drag to turn around the walker (left/right) and look from lower or higher
+  (up/down); mouse wheel or pinch to zoom (0.35× to 4×); double-click or "⟲ Reset camera" for
+  the default view. Remembered in this browser; OBS view always uses the default. The camera
+  moves in towards the walker rather than into a building, and more terrain is kept behind when
+  you look back. The walker sprite is placed by projecting her feet and head from the scene, so
+  she stays on the path at the right size; she only has back-view frames, so from the front or
+  the side she still shows her back.
 - **Quality** (toolbar, remembered):
 
   | | pixels | ahead | plants drawn | buildings drawn | density | shadows | bloom |
@@ -146,6 +153,7 @@ own ~700 KB chunk, plus ~2 MB of models and textures from `public/worlds/fantasy
 | `fantasy/gen.ts` | Pure generation: seeded RNG and noise, `TrailPath`, biome plan and blending, terrain heights, field patchwork, rain, time of day, quality presets, prop scatter, buildings (`house()`, `tower()`, `ruin()`, castles) and waterfalls. Unit-tested. |
 | `fantasy/assets.ts` | The kit: loads models and textures, materials, procedural pieces (foundations, battlements, lanterns, windmill, archway), baking a chunk's buildings. |
 | `fantasy/props.ts` | Scattered props: stylised trees, grass, crops, rocks, village props (procedural), kit models. |
+| `fantasy/orbit.ts` | The user camera: orbit/zoom maths, walker sprite placement, keeping out of buildings. Unit-tested. |
 | `fantasy/shaders.ts` | Wind sway, sky dome, textured ground (noise, cobbles, cliff rock), waterfalls, glowing particles. |
 | `fantasy/world.ts` | three.js scene, chunk streaming, lights, fog, rain, bloom, camera, toolbar, debug panel. |
 

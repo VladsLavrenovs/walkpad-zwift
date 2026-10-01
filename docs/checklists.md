@@ -46,6 +46,9 @@ possible. Tick them off there.
 - [ ] "⟳ New world" in the fantasy toolbar: pick a starting biome, Generate: a new path and
       scenery starting there, the trail's progress unchanged; on a remote (tunnel) viewer the
       button is disabled.
+- [ ] Camera: drag turns around the walker and tilts, wheel (PC) and pinch (phone/tablet) zoom,
+      double-click resets; the walker stays on the path at the right size while walking; turning
+      towards houses keeps the camera out of them.
 - [ ] No visible stutter when new streets appear ahead (debug panel: "build ≤ … ms" stays under ~20).
 
 ## Prompt 8 (Cloudflare: Pages deploy, Tunnel, Access)

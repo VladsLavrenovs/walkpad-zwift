@@ -13,6 +13,11 @@ export interface WorldContext {
   canEdit(): boolean
   /** Show or hide the walker sprite (a world may offer a toggle). */
   setWalkerVisible(on: boolean): void
+  /**
+   * Move/scale the walker sprite from its normal spot (screen pixels; scale about her feet), for
+   * a world whose camera can move; null hides her. Worlds that never call it leave her in place.
+   */
+  placeWalker(p: { dx: number; dy: number; scale: number } | null): void
   /** true for `?view=obs`: no world UI either. */
   obs: boolean
   /** The active route's shape, once loaded (null: no active route, or a trail without a map). */

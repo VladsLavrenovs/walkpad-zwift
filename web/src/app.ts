@@ -129,12 +129,16 @@ export class App {
     this.worldId = info.id
     const world = info.create()
     this.world = world
+    this.walker.place({ dx: 0, dy: 0, scale: 1 })
     this.walker.visible = world.showsWalker
     await world.init(this.worldEl, {
       bridge: this.bridge,
       canEdit: () => this.controlAllowed && !this.config.obs,
       setWalkerVisible: (on) => {
         if (this.world === world) this.walker.visible = on
+      },
+      placeWalker: (p) => {
+        if (this.world === world) this.walker.place(p)
       },
       obs: this.config.obs,
       route: () => this.minimap.line,

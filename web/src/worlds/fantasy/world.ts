@@ -60,15 +60,17 @@ import {
   waterfalls,
 } from './gen'
 import { BUILDING_MODELS, Kit, MODEL_FOR, bake, millBlades } from './assets'
+import { type Box, DEFAULT_VIEW, type OrbitView, clampView, clearance, isDefaultView, orbitPose, walkerPlacement } from './orbit'
 import { PropLibrary } from './props'
 import { CLOCK, SkyDome, glowPointsMaterial, groundMaterial, noiseTexture, rippleNormals, waterfallMaterial } from './shaders'
 
 const CHUNK_M = 40
 const ROW_M = 4
 const BEHIND_M = 60
-const CAMERA_BACK_M = 7
-const CAMERA_UP_M = 3.2
 const LOOK_AHEAD_M = 9
+/** The walker's height in the scene, for placing the sprite when the camera moves. */
+const WALKER_M = 1.7
+const CAMERA_KEY = 'walkpad.fantasy.camera'
 const HALF_LATERALS = [0.8, 1.6, 2.4, 3.4, 4.8, 6.5, 8.5, 11, 13.5, 16, 18.5, 21, 24, 28, 33, 40, 50, 64, 90, 140, 200]
 const LATERALS = [...HALF_LATERALS.map((l) => -l).reverse(), 0, ...HALF_LATERALS]
 const QUALITY_KEY = 'walkpad.fantasy.quality'
@@ -194,11 +196,22 @@ export class FantasyWorld implements World {
   private buildMs = 0
   private toolbar: HTMLDivElement | null = null
   private disposed = false
+  /** User camera: where it is going (input) and where it is (damped towards it). */
+  private view: OrbitView = { ...DEFAULT_VIEW }
+  private shownView: OrbitView = { ...DEFAULT_VIEW }
+  /** The default chase camera, to place the walker sprite relative to her normal spot. */
+  private refCamera = new THREE.PerspectiveCamera(60, 1, 0.2, 1400)
+  private pointers = new Map<number, { x: number; y: number }>()
+  /** Building footprints near the walker (for the camera), refreshed every 20 m. */
+  private nearBuildings: { s: number; boxes: Box[] } = { s: Number.NaN, boxes: [] }
+  private pinch = 0
 
   init(container: HTMLElement, ctx: WorldContext): void {
     this.ctx = ctx
     this.quality = (readKey(QUALITY_KEY) as Quality) in QUALITY ? (readKey(QUALITY_KEY) as Quality) : 'high'
     this.timeMode = readKey(TIME_KEY) === 'real' ? 'real' : 'cycle'
+    if (!ctx.obs) this.view = loadView()
+    this.shownView = { ...this.view }
     this.root = document.createElement('div')
     this.root.className = 'fantasy-world'
     this.debugEl = document.createElement('div')
@@ -231,7 +244,10 @@ export class FantasyWorld implements World {
     this.envScene.add(new THREE.Mesh(this.sky.mesh.geometry, this.sky.mesh.material))
     this.makeFireflies()
     this.makeRain()
-    if (!ctx.obs) this.buildToolbar()
+    if (!ctx.obs) {
+      this.buildToolbar()
+      this.listenForCamera()
+    }
     window.addEventListener('keydown', this.onKey)
     this.resize.observe(this.root)
     this.fit()
@@ -293,6 +309,8 @@ export class FantasyWorld implements World {
     this.composer?.setSize(w, h)
     this.camera.aspect = w / h
     this.camera.updateProjectionMatrix()
+    this.refCamera.aspect = w / h
+    this.refCamera.updateProjectionMatrix()
     for (const m of [this.sprayMaterial, this.fireflies?.material as THREE.ShaderMaterial | undefined]) {
       if (m) m.uniforms.uPixelRatio.value = this.renderer.getPixelRatio()
     }
@@ -343,6 +361,8 @@ export class FantasyWorld implements World {
       <span class="fantasy-trail"></span>
       <label>quality <select class="fq"><option value="high">high</option><option value="medium">medium</option><option value="low">low</option></select></label>
       <label>time <select class="ft"><option value="cycle">day cycle</option><option value="real">real time</option></select></label>
+      <button type="button" class="fcam" hidden title="Back to the camera behind the walker (or double-click)">⟲ Reset camera</button>
+      <span class="fantasy-hint muted">drag: turn · wheel/pinch: zoom</span>
       <button type="button" class="fn">⟳ New world</button>
       <div class="fantasy-regen" hidden>
         <label>start in <select class="fs"><option value="">random</option>${START_BIOMES.map((b) => `<option value="${b}">${BIOME_NAMES[b]}</option>`).join('')}</select></label>
@@ -373,9 +393,93 @@ export class FantasyWorld implements World {
       regen.hidden = true
       void this.regenerate(isStartBiome(chosen) ? chosen : randomStartBiome())
     }
+    bar.querySelector<HTMLButtonElement>('.fcam')!.onclick = () => this.setView({ ...DEFAULT_VIEW })
     this.toolbar = bar
     this.root.append(bar)
     this.updateRegenButton()
+  }
+
+  // --- user camera -------------------------------------------------------------------------------
+
+  private setView(v: OrbitView): void {
+    this.view = clampView(v)
+    writeKey(CAMERA_KEY, JSON.stringify(this.view))
+    const reset = this.toolbar?.querySelector<HTMLButtonElement>('.fcam')
+    if (reset) reset.hidden = isDefaultView(this.view)
+  }
+
+  /** Drag to turn around the walker (and up/down), wheel or pinch to zoom, double-click to reset. */
+  private listenForCamera(): void {
+    const root = this.root
+    const fromUi = (e: Event) => e.target instanceof Element && e.target.closest('.fantasy-toolbar, .fantasy-debug') !== null
+    root.addEventListener('pointerdown', (e) => {
+      if (fromUi(e) || (e.pointerType === 'mouse' && e.button !== 0)) return
+      this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY })
+      root.setPointerCapture(e.pointerId)
+      root.classList.add('dragging')
+      if (this.pointers.size === 2) this.pinch = pinchDistance(this.pointers)
+    })
+    root.addEventListener('pointermove', (e) => {
+      const last = this.pointers.get(e.pointerId)
+      if (!last) return
+      const dx = e.clientX - last.x
+      const dy = e.clientY - last.y
+      this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY })
+      if (this.pointers.size === 1) {
+        this.setView({ ...this.view, yaw: this.view.yaw - dx * 0.35, elevation: this.view.elevation + dy * 0.25 })
+      } else if (this.pointers.size === 2) {
+        const d = pinchDistance(this.pointers)
+        if (this.pinch > 0 && d > 0) this.setView({ ...this.view, zoom: this.view.zoom * (this.pinch / d) })
+        this.pinch = d
+      }
+    })
+    const end = (e: PointerEvent) => {
+      this.pointers.delete(e.pointerId)
+      this.pinch = this.pointers.size === 2 ? pinchDistance(this.pointers) : 0
+      if (this.pointers.size === 0) root.classList.remove('dragging')
+    }
+    root.addEventListener('pointerup', end)
+    root.addEventListener('pointercancel', end)
+    root.addEventListener('wheel', (e) => {
+      if (fromUi(e)) return
+      e.preventDefault()
+      this.setView({ ...this.view, zoom: this.view.zoom * Math.exp(e.deltaY * 0.0012) })
+    }, { passive: false })
+    root.addEventListener('dblclick', (e) => {
+      if (!fromUi(e)) this.setView({ ...DEFAULT_VIEW })
+    })
+    this.setView(this.view)
+  }
+
+  private buildingsNear(s: number): Box[] {
+    if (!this.kitReady) return []
+    if (!(Math.abs(s - this.nearBuildings.s) < 20)) {
+      const boxes = structures(this.path!.seed, this.plan, s - 90, s + 90).filter((st) => st.foot).map((st) => st.foot!)
+      this.nearBuildings = { s, boxes }
+    }
+    return this.nearBuildings.boxes
+  }
+
+  /** Keep the walker sprite on her spot in the scene: relative to where the default camera has her. */
+  private placeWalker(here: { x: number; z: number }, heading: number): void {
+    if (isDefaultView(this.shownView) && Math.abs(this.camera.position.y - orbitPose(here.x, here.z, heading, DEFAULT_VIEW).camera.y) < 0.05) {
+      this.ctx.placeWalker({ dx: 0, dy: 0, scale: 1 })
+      return
+    }
+    const ref = orbitPose(here.x, here.z, heading, DEFAULT_VIEW)
+    this.refCamera.position.set(ref.camera.x, ref.camera.y, ref.camera.z)
+    this.refCamera.lookAt(ref.target.x, ref.target.y, ref.target.z)
+    this.refCamera.updateMatrixWorld()
+    this.camera.updateMatrixWorld()
+    const w = this.root.clientWidth || window.innerWidth
+    const h = this.root.clientHeight || window.innerHeight
+    const screen = (camera: THREE.Camera, y: number) => {
+      const p = new THREE.Vector3(here.x, y, here.z).project(camera)
+      return { x: ((p.x + 1) / 2) * w, y: ((1 - p.y) / 2) * h, behind: p.z > 1 }
+    }
+    this.ctx.placeWalker(walkerPlacement(
+      screen(this.camera, 0), screen(this.camera, WALKER_M), screen(this.refCamera, 0), screen(this.refCamera, WALKER_M),
+    ))
   }
 
   /** Remote viewers (read-only) cannot change a trail; a free walk is this browser's own. */
@@ -445,6 +549,7 @@ export class FantasyWorld implements World {
     this.path = new TrailPath(trail.seed)
     this.plan = biomePlan(trail.seed, trail.length, (trail.length ?? 0) + 500_000, trail.start)
     this.haveHeading = false
+    this.nearBuildings = { s: Number.NaN, boxes: [] }
     this.clearChunks()
     const label = this.toolbar?.querySelector('.fantasy-trail')
     if (label) label.textContent = trail.length ? `${trail.name} · ${(trail.length / 1000).toFixed(1)} km` : trail.name
@@ -476,11 +581,32 @@ export class FantasyWorld implements World {
     }
     const h = (this.heading * Math.PI) / 180
     const w = biomeWeights(this.plan, s)
-    const camX = here.x - Math.sin(h) * CAMERA_BACK_M
-    const camZ = here.z - Math.cos(h) * CAMERA_BACK_M
-    const camY = Math.max(CAMERA_UP_M, groundHeight(path.seed, camX, camZ, 0, w) + 1.5)
-    this.camera.position.set(camX, damp(this.camera.position.y || camY, camY, dt, 0.4), camZ)
-    this.camera.lookAt(here.x + Math.sin(h) * LOOK_AHEAD_M, 1.1, here.z + Math.cos(h) * LOOK_AHEAD_M)
+    // The user's view (drag / wheel / pinch) eases in; the default is the classic chase camera.
+    const v = this.shownView
+    v.yaw = clampView({ ...v, yaw: v.yaw + shortestTurn(v.yaw, this.view.yaw) * (1 - Math.exp(-dt / 0.12)) }).yaw
+    v.elevation = damp(v.elevation, this.view.elevation, dt, 0.12)
+    v.zoom = damp(v.zoom, this.view.zoom, dt, 0.12)
+    const pose = orbitPose(here.x, here.z, h, v)
+    // Never inside a building: move in towards the walker when one is in the way.
+    if (!isDefaultView(v)) {
+      const ox = pose.camera.x - here.x
+      const oz = pose.camera.z - here.z
+      const forward = ox * Math.sin(here.heading) + oz * Math.cos(here.heading)
+      const right = ox * Math.cos(here.heading) - oz * Math.sin(here.heading)
+      const t = clearance(s, forward, right, this.buildingsNear(s))
+      if (t < 1) {
+        pose.camera.x = here.x + ox * t
+        pose.camera.z = here.z + oz * t
+        pose.camera.y = Math.max(1.6, pose.camera.y * t)
+      }
+    }
+    // Stay above the ground under the camera (hills, cliffs) wherever it has been turned to.
+    const lateral = -Math.sin((v.yaw * Math.PI) / 180) * Math.hypot(pose.camera.x - here.x, pose.camera.z - here.z)
+    const floor = groundHeight(path.seed, pose.camera.x, pose.camera.z, lateral, w) + (isDefaultView(v) ? 1.5 : 0.8)
+    const camY = Math.max(pose.camera.y, floor)
+    this.camera.position.set(pose.camera.x, damp(this.camera.position.y || camY, camY, dt, 0.25), pose.camera.z)
+    this.camera.lookAt(pose.target.x, pose.target.y, pose.target.z)
+    this.placeWalker(here, h)
 
     this.underlay.position.set(here.x, -2.5, here.z)
     const under = this.underlay.material as THREE.MeshStandardMaterial
@@ -592,7 +718,9 @@ export class FantasyWorld implements World {
   // --- chunk streaming ---------------------------------------------------------------------------
 
   private stream(s: number): void {
-    const first = Math.floor((s - BEHIND_M) / CHUNK_M)
+    // Looking back (camera turned or zoomed out) needs more terrain behind the walker.
+    const back = Math.abs(this.view.yaw) > 50 ? QUALITY[this.quality].viewM * 0.6 : BEHIND_M * Math.max(1, this.view.zoom)
+    const first = Math.floor((s - back) / CHUNK_M)
     const last = Math.floor((s + QUALITY[this.quality].viewM) / CHUNK_M)
     for (const [i, chunk] of this.chunks) {
       if (i < first || i > last) this.dropChunk(chunk)
@@ -921,6 +1049,7 @@ export class FantasyWorld implements World {
       next ? `next ${BIOME_NAMES[next.biome]} in ${((next.start - s) / 1000).toFixed(2)} km` : '',
       `time ${String(Math.floor(hour)).padStart(2, '0')}:${String(Math.floor((hour % 1) * 60)).padStart(2, '0')} (${this.timeMode})  rain ${this.rainIntensity.toFixed(2)}`,
       `fps ${this.fps.toFixed(0)}  ·  draw calls ${info.calls}  ·  triangles ${info.triangles}`,
+      `camera yaw ${this.shownView.yaw.toFixed(0)}°  ·  elevation ${this.shownView.elevation.toFixed(0)}°  ·  zoom ${this.shownView.zoom.toFixed(2)}`,
       `chunks ${this.chunks.size} (build ≤ ${this.buildMs.toFixed(1)} ms)  ·  quality ${this.quality}  ·  kit ${this.kitReady ? 'ready' : 'loading'}`,
     ].filter(Boolean).join('\n')
   }
@@ -967,4 +1096,25 @@ function writeKey(key: string, value: string): void {
   } catch {
     /* ignore */
   }
+}
+
+/** The camera view saved in this browser, or the default. */
+function loadView(): OrbitView {
+  try {
+    const v = JSON.parse(readKey(CAMERA_KEY) ?? 'null') as OrbitView | null
+    if (v && [v.yaw, v.elevation, v.zoom].every(Number.isFinite)) return clampView(v)
+  } catch {
+    /* ignore */
+  }
+  return { ...DEFAULT_VIEW }
+}
+
+/** Degrees to turn from `from` to `to` the short way round. */
+function shortestTurn(from: number, to: number): number {
+  return ((((to - from + 180) % 360) + 360) % 360) - 180
+}
+
+function pinchDistance(pointers: Map<number, { x: number; y: number }>): number {
+  const [a, b] = [...pointers.values()]
+  return a && b ? Math.hypot(a.x - b.x, a.y - b.y) : 0
 }

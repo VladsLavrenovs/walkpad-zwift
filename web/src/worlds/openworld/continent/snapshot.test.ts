@@ -27,7 +27,7 @@ describe('saved world snapshots', () => {
       const b = biomeWeightsAt(back, x, z)
       for (const k of Object.keys(a) as (keyof typeof a)[]) expect(b[k]).toBeCloseTo(a[k], 1)
     }
-  })
+  }, 20_000) // generates a whole continent, then compresses it
 
   it('refuses something that is not a world snapshot', async () => {
     const junk = new Uint8Array(await new Response(

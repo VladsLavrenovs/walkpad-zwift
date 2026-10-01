@@ -31,6 +31,8 @@ export interface WorldContext {
 export interface World {
   /** Whether the app shows the walker sprite over this world when it starts. */
   readonly showsWalker: boolean
+  /** false: the world wants the odometer even on an active route (it is not a route world). */
+  readonly usesRoute?: boolean
   /** Build the scene inside `container` (full-screen, behind the HUD). */
   init(container: HTMLElement, ctx: WorldContext): void | Promise<void>
   /**

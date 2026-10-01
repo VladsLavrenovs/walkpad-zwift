@@ -194,7 +194,7 @@ texture downscaling).
 New dependency: `three` (three.js, the standard WebGL library; named in the brief). Post-processing
 (bloom) uses three's own addons, nothing new.
 
-## Open world (in progress)
+## Open world
 
 A separate mode, built in milestones (plan: owner-approved). It does not change the other
 worlds: its code is `src/worlds/openworld/`, loaded only when used.
@@ -234,7 +234,30 @@ changes to the generator never reshape it; each records the generator version th
 world will walk in; the first one saved is active), Rename, Delete. The map opens on the active
 world. Saving and switching need the local page; the public site can only look.
 
-Next (rest of 1b): walking the active world in 3D: steering with A/D, position saved per world.
+**Walking it (World menu → Open world).** You walk in the ★ world. The pad decides how far, **A /
+D** (or Q / E) turn; drag to look around, wheel to zoom, double-click to reset the camera. **M**
+(or the Map button) opens the world map with your arrow on it. Where you are is saved on the
+bridge every few seconds (and when leaving), per world: the next walk continues there. A new
+world starts in its first city. Remote (view-only) pages never move or save: they follow the
+position the bridge has.
+
+- **Terrain** in 64 m tiles around you: fine near (2 m grid, plants, buildings), coarse out to
+  the quality's view distance, and one low-detail mesh of the whole island beyond (with a hole
+  where the tiles are), so far mountains are always on the horizon. Ground from the saved
+  world's 20 m grid with fine detail, flat in towns, carved under rivers (`openworld/ground.ts`).
+- **Water:** the sea, flat lakes, rivers as ribbons in their channels (you can wade through,
+  not into lakes or the sea), waterfalls with spray.
+- **Towns** (`openworld/towns.ts`): houses along the roads leaving each village and city,
+  facing the street, a second row in cities, lanterns, wells, stalls, barrels; castles as walled
+  compounds with towers, a gate towards the road and a keep; elven ruins; windmills. Built from
+  the same kit as the fantasy trail and baked per tile.
+- **Plants** (`openworld/flora.ts`): the fantasy prop tables as densities per square metre,
+  chosen by the biome mix; crops in their field patches.
+- **Walking** (`openworld/movement.ts`): buildings, cliffs, lakes and the sea stop you; you
+  slide along walls; nearly head-on, you stop and the HUD says to turn.
+- **HUD:** compass, where you are (province · nearest place · biome), a banner when you enter
+  a new province, a north-up minimap. Quality, time of day and a debug panel (`` ` ``) as in the
+  fantasy world.
 
 | Module | Role |
 |---|---|
@@ -247,6 +270,11 @@ Next (rest of 1b): walking the active world in 3D: steering with A/D, position s
 | `openworld/continent/worker.ts` | Runs the generator off the main thread |
 | `openworld/continent/snapshot.ts` | A saved world as compact bytes (encode / decode); unit-tested |
 | `openworld/mapdraw.ts`, `mappage.ts` | The world map page |
+| `openworld/ground.ts` | Ground height, water, roads at metre scale (shared by everything) |
+| `openworld/towns.ts`, `flora.ts` | Buildings and plants, deterministic |
+| `openworld/movement.ts` | Walking and steering (keys never overlap the belt keys) |
+| `openworld/scene.ts`, `world.ts` | The 3D world: renderer and atmosphere; tiles, water, camera, HUD, saving |
+| `openworld/openworld.test.ts` | Ground, towns, plants, walking, and "no belt calls" |
 
 ## Real world (3D) world
 

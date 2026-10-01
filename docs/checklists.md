@@ -68,6 +68,18 @@ possible. Tick them off there.
       "Walk here" moves the ★; reload: the map opens on the ★ world. On the public site only
       "View" is offered.
 
+## Open world, milestone 1b (walking the world)
+
+- [ ] World menu → Open world: you stand in your ★ world (a new one: in its first city).
+- [ ] Walking moves you forward; A / D turn (never the belt); arrow keys still change the belt
+      speed only.
+- [ ] Houses, castles, cliffs, lakes and the sea stop you (you slide along walls); rivers can
+      be waded.
+- [ ] Stop and come back later (or reload): you continue where you were. On the map (M) your
+      arrow is where you stood.
+- [ ] Compass, place names, the province banner and the minimap look right; 60 fps on the PC
+      at high.
+
 ## Prompt 8 (Cloudflare: Workers deploy, Tunnel, Access) — setup: [cloudflare.md](cloudflare.md)
 
 - [ ] `walkpad-tunnel` service active and the tunnel **Healthy** in the dashboard; it comes back

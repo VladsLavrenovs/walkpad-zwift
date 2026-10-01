@@ -6,11 +6,12 @@ import { YouTubeWorld } from './youtube'
 import type { World, WorldContext, WorldInfo } from './world'
 
 /** A world whose code (and big libraries, e.g. three.js) is downloaded only when it is chosen. */
-function lazyWorld(showsWalker: boolean, load: () => Promise<World>): World {
+function lazyWorld(showsWalker: boolean, load: () => Promise<World>, usesRoute = true): World {
   let inner: World | null = null
   let disposed = false
   return {
     showsWalker,
+    usesRoute,
     async init(container: HTMLElement, ctx: WorldContext) {
       const world = await load()
       if (disposed) return
@@ -33,6 +34,11 @@ export const WORLDS: WorldInfo[] = [
     id: 'fantasy',
     name: 'Fantasy trail',
     create: () => lazyWorld(true, async () => new (await import('./fantasy/world')).FantasyWorld()),
+  },
+  {
+    id: 'openworld',
+    name: 'Open world',
+    create: () => lazyWorld(true, async () => new (await import('./openworld/world')).OpenWorld(), false),
   },
   { id: 'youtube', name: 'YouTube walk', create: () => new YouTubeWorld() },
   { id: 'overlay', name: 'Overlay only (for OBS)', create: () => new OverlayWorld() },

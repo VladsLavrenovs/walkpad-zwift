@@ -334,6 +334,16 @@ export class WorldMapPage {
     }
     const order: PlaceKind[] = ['waterfall', 'windmill', 'ruins', 'castle', 'village', 'city']
     for (const kind of order) for (const p of world.places.filter((q) => q.kind === kind)) add(this.placeMarker(p))
+    // Where you are in a saved world (from the bridge).
+    const me = this.shown?.kind === 'saved' ? this.shown.saved : null
+    if (me && me.x !== null && me.z !== null) {
+      const deg = (((me.heading ?? 0) * 180) / Math.PI - 90).toFixed(0) // ➤ points east; heading 0 = north
+      add(L.marker(L.latLng(me.z, me.x), {
+        title: 'You are here',
+        zIndexOffset: 1000,
+        icon: L.divIcon({ className: 'wm-me', html: `<i style="transform: translate(-50%, -50%) rotate(${deg}deg)">➤</i>`, iconSize: [0, 0] }),
+      }))
+    }
   }
 
   private placeMarker(p: Place): L.Marker {

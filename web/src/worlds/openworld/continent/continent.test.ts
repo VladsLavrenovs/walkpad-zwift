@@ -12,7 +12,7 @@ beforeAll(() => {
     worlds.set(seed, generateContinent(seed))
     timings.set(seed, performance.now() - t0)
   }
-})
+}, 30_000)
 
 const isLandCell = (w: number) => w === Water.Land || w === Water.River
 

@@ -223,6 +223,25 @@ button:disabled { cursor: not-allowed; opacity: 0.45; }
 .on-stats > .world, .on-stats > .walker, .on-stats > .hud, .on-stats > .topbar, .on-stats > .minimap { visibility: hidden; }
 .on-stats .yt-toolbar, .on-stats .yt-panel { display: none; }
 
+/* --- Open world ---------------------------------------------------------------------------- */
+.ow-compass { position: absolute; top: 132px; left: 50%; transform: translateX(-50%); width: min(420px, 70vw); height: 26px;
+  overflow: hidden; border-radius: 13px; background: rgb(10 14 20 / 0.55); border: 1px solid var(--line); pointer-events: none; }
+.ow-strip { position: absolute; top: 0; left: 0; height: 100%; }
+.ow-strip span { position: absolute; top: 4px; transform: translateX(-50%); font: 11px/16px system-ui, sans-serif; color: #c9d3de; }
+.ow-strip span.big { font-weight: 800; color: #fff; font-size: 13px; }
+.ow-needle { position: absolute; left: 50%; top: 0; bottom: 0; width: 2px; background: #ff5a5a; transform: translateX(-1px); }
+.ow-where { position: absolute; top: 162px; left: 50%; transform: translateX(-50%); font-size: 13px; color: #e8edf2; white-space: nowrap;
+  text-shadow: 0 1px 3px #000c; pointer-events: none; }
+.ow-banner { position: absolute; top: 32%; left: 50%; transform: translateX(-50%); font: italic 600 34px/1.2 Georgia, serif; letter-spacing: 0.12em;
+  color: #fff; text-shadow: 0 2px 12px #000a; pointer-events: none; white-space: nowrap; }
+.ow-banner.fade { animation: ow-banner 4.5s ease forwards; }
+@keyframes ow-banner { 0% { opacity: 0 } 15% { opacity: 1 } 75% { opacity: 1 } 100% { opacity: 0 } }
+.ow-minimap { position: absolute; right: 16px; top: 56px; width: 190px; height: 190px; pointer-events: none; filter: drop-shadow(0 3px 10px #0008); }
+.ow-note { position: absolute; top: 45%; left: 50%; transform: translate(-50%, -50%); max-width: 520px; padding: 14px 18px; border-radius: 10px;
+  background: var(--panel); border: 1px solid var(--line); color: var(--ink); text-align: center; }
+.ow-note[hidden] { display: none; }
+.obs .ow-minimap, .obs .ow-where, .obs .ow-compass { display: none; }
+
 /* --- World map (open world) --------------------------------------------------------------- */
 .worldmap-page { position: absolute; inset: 0; z-index: 30; display: flex; flex-direction: column; background: #0f1620; }
 .worldmap-page header { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 10px 16px; }
@@ -257,6 +276,8 @@ button:disabled { cursor: not-allowed; opacity: 0.45; }
 .wm-far .wm-place.wm-windmill, .wm-far .wm-place.wm-ruins, .wm-far .wm-place.wm-waterfall { display: none; }
 .wm-province span { position: absolute; transform: translate(-50%, -50%); white-space: nowrap; font: italic 600 14px/1 Georgia, serif;
   letter-spacing: 0.18em; text-transform: uppercase; color: rgb(70 30 72 / 0.55); text-shadow: 0 0 4px rgb(255 255 255 / 0.5); pointer-events: none; }
+.wm-me i { position: absolute; font-style: normal; font-size: 22px; color: #ff4d4d; text-shadow: 0 0 3px #fff, 0 0 2px #fff;
+  display: inline-block; }
 .wm-legend { background: rgb(255 255 255 / 0.9); color: #222; padding: 8px 10px; border-radius: 6px; font: 12px/1.6 system-ui, sans-serif; }
 .wm-legend b { display: inline-block; width: 14px; height: 10px; margin-right: 6px; vertical-align: middle; border-radius: 2px; }
 .wm-legend i { display: inline-block; width: 14px; margin-right: 6px; text-align: center; font-style: normal; }

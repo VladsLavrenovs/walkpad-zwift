@@ -200,7 +200,7 @@ export class App {
     const route = this.routeTracker
     route.advance(m.lastMetres, this.minimap.line?.length ?? Number.POSITIVE_INFINITY)
     const onRoute = route.routeId !== null
-    this.world?.update(onRoute ? route.position : m.odometerM, m.speedKmh, dt)
+    this.world?.update(onRoute && this.world.usesRoute !== false ? route.position : m.odometerM, m.speedKmh, dt)
     if (onRoute) this.minimap.update(route.position, dt)
     this.walker.update(m.cadence(), m.speedKmh, dt)
     this.hud.speed.textContent = fmtSpeed(m.speedKmh)

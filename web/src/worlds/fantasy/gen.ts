@@ -406,7 +406,7 @@ export interface Placement {
 
 type Table = [PropKind, number, [number, number]][] // kind, count per 100 m, lateral range
 
-const PROPS: Record<Biome, Table> = {
+export const PROPS: Record<Biome, Table> = {
   forest: [
     ['pine', 38, [5, 85]], ['pine', 26, [4.6, 22]], ['oak', 9, [6, 80]], ['birch', 6, [4, 60]], ['deadtree', 3, [4, 60]],
     ['rock', 12, [2.6, 60]], ['bush', 30, [2.4, 40]], ['mushroom', 18, [2.2, 12]], ['fern', 160, [2.2, 26]],

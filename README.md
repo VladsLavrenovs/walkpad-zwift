@@ -17,9 +17,11 @@ Status: bridge runs as a service (real pad over BLE, sessions, stats, live WebSo
         [receiver: Windows, virtual gamepad]     -> later, optional
 ```
 
-Production access goes through Cloudflare: the web app deploys from GitHub, the bridge is exposed
-via a Cloudflare Tunnel (`walkpad-bridge.connectedovals.com`), and both hostnames sit behind
-Cloudflare Access allowing only the owner.
+Production access goes through Cloudflare: the web app deploys from GitHub to a Cloudflare Worker
+(`walk.connectedovals.com`, view-only: live data and stats), the bridge is exposed via a
+Cloudflare Tunnel (`walkpad-bridge.connectedovals.com`, read-only), and both hostnames sit behind
+one Cloudflare Access application allowing only the owner. Belt control only ever works from
+the page the bridge serves on the home network. Setup: [docs/cloudflare.md](docs/cloudflare.md).
 
 ## Repo layout
 

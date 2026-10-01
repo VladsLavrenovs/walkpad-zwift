@@ -122,6 +122,13 @@ Control responses are the new status plus `applied_target_kmh`: the target **aft
 the request echoed. Errors: 403 not allowed from here, 409 not possible now (no WebSocket for this
 client, pad not connected, belt still starting), 422 bad input, 503 pad write failed.
 
+**Origin check** (all requests and WebSockets, `server.py` `OriginGuard`): a browser request whose
+`Origin` is not one of `[server] app_origins` (the Cloudflare site and the tunnel hostname) and not
+a page on localhost, a LAN address or this machine's name gets **403** (WebSocket: refused before
+accept). Requests without `Origin` (curl, the page's own same-origin GETs) pass. CORS lets the app
+origins read (GET, with credentials, for the Cloudflare Access cookie), never write. Setup of
+the tunnel and Access: [docs/cloudflare.md](../docs/cloudflare.md).
+
 **Control rules** (see `access.py`, `service.py`):
 - Only from localhost or a private/link-local LAN address. Requests carrying Cloudflare or proxy
   forwarding headers (`Cf-Connecting-Ip`, `X-Forwarded-For`, ...) are remote even though
@@ -194,7 +201,7 @@ On Windows (dev only) the signals are Ctrl+C and Ctrl+Break; SIGTERM there is an
 | `recorder.py` | `SessionRecorder`: samples in, sessions out; start/end with the belt, counter resets. |
 | `stats.py` | Period totals, streaks, personal bests over finished sessions. |
 | `service.py` | `BridgeService`: pad connection loop, controller, recorder, WebSocket/UDP fan-out, client grace period. |
-| `access.py` | Who may control: localhost/LAN, tunnel detection, Host check. |
+| `access.py` | Who may control: localhost/LAN, tunnel detection, Host check; which browser origins may connect at all. |
 | `server.py` | FastAPI app: endpoints above, CORS, the web app. |
 | `udp.py` | `UdpSender`: JSON datagrams. |
 | `youtube.py` | YouTube link parsing (id and `t=` start) for the video library. |

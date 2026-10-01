@@ -1,0 +1,20 @@
+# Cloudflare Tunnel for the WalkPad bridge, as a systemd *user* service (like the bridge).
+# Install: docs/cloudflare.md. The tunnel is managed in the Cloudflare dashboard (its public
+# hostname walkpad-bridge.connectedovals.com points at http://localhost:8080); this only runs
+# the connector. Everything that arrives through it is read-only on the bridge.
+
+[Unit]
+Description=WalkPad Cloudflare Tunnel (walkpad-bridge.connectedovals.com -> bridge on :8080)
+Documentation=file://%h/Documents/Projects/walkingpad/walkpad-zwift/docs/cloudflare.md
+After=walkpad-bridge.service
+
+[Service]
+Type=exec
+# The tunnel token: TUNNEL_TOKEN=... in this file (chmod 600). Never in the repo.
+EnvironmentFile=%h/.config/walkpad/tunnel.env
+ExecStart=/usr/bin/cloudflared --no-autoupdate tunnel run
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

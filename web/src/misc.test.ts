@@ -8,8 +8,11 @@ import { hash01, sceneryAt } from './worlds/placeholder'
 describe('config', () => {
   it('reads the bridge URL and the view mode', () => {
     const c = loadConfig({ VITE_BRIDGE_URL: 'https://bridge.example/' } as ImportMetaEnv, '?view=obs&world=overlay')
-    expect(c).toEqual({ bridgeUrl: 'https://bridge.example', obs: true, world: 'overlay' })
+    expect(c).toEqual({ bridgeUrl: 'https://bridge.example', obs: true, viewOnly: true, world: 'overlay' })
     expect(loadConfig({} as ImportMetaEnv, '').bridgeUrl).toBe('')
+    // Served by the bridge (same origin): may control. Hosted elsewhere: view only.
+    expect(loadConfig({} as ImportMetaEnv, '').viewOnly).toBe(false)
+    expect(loadConfig({ VITE_BRIDGE_URL: 'https://bridge.example' } as ImportMetaEnv, '').viewOnly).toBe(true)
   })
 
   it('builds WebSocket URLs, same origin when no bridge URL is set', () => {

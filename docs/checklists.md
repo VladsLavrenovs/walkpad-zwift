@@ -51,7 +51,18 @@ possible. Tick them off there.
       towards houses keeps the camera out of them.
 - [ ] No visible stutter when new streets appear ahead (debug panel: "build ≤ … ms" stays under ~20).
 
-## Prompt 8 (Cloudflare: Pages deploy, Tunnel, Access)
+## Prompt 8 (Cloudflare: Workers deploy, Tunnel, Access) — setup: [cloudflare.md](cloudflare.md)
+
+- [ ] `walkpad-tunnel` service active and the tunnel **Healthy** in the dashboard; it comes back
+      after a reboot.
+- [ ] A push to `main` deploys `walk.connectedovals.com` (Workers Builds log shows
+      `build:cloudflare` and `wrangler deploy`); no `*.workers.dev` address answers.
+- [ ] From a phone on mobile data: `https://walk.connectedovals.com` asks for the PIN once, then
+      shows live data and stats with the "view only" badge and no controls.
+- [ ] A private window without signing in: both hostnames show only the Access login.
+- [ ] Another website cannot read the bridge: in the browser console on any other site,
+      `fetch('https://walkpad-bridge.connectedovals.com/status', {credentials: 'include'})`
+      fails, and the bridge logs `refused http /status from origin ...`.
 
 - [ ] Through the tunnel (`https://walkpad-bridge.connectedovals.com`), control is refused:
       `POST /control/stop` with an `X-Client-Id` header returns **403**, while `/status`,

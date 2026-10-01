@@ -93,7 +93,8 @@ export class App {
     this.toastEl = q('.toast')
 
     // OBS pages never control the belt, so they connect without a client id.
-    this.bridge = new BridgeClient(config.bridgeUrl, config.obs ? null : clientId(safeStorage()), {
+    // OBS and the separately hosted (view-only) page connect without a client id: never in control.
+    this.bridge = new BridgeClient(config.bridgeUrl, config.obs || config.viewOnly ? null : clientId(safeStorage()), {
       onMessage: (m) => this.onMessage(m),
       onLink: (s) => this.onLink(s),
     })
@@ -212,7 +213,7 @@ export class App {
   private onLink(state: LinkState): void {
     this.link = state
     if (state !== 'live') this.motion.onDisconnect()
-    if (state === 'live' && !this.config.obs) {
+    if (state === 'live' && !this.config.obs && !this.config.viewOnly) {
       // control_allowed depends on who is asking, so it comes from GET /status.
       this.bridge
         .status()

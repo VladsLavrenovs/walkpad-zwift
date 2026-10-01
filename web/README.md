@@ -41,6 +41,28 @@ To use it for real walks: `npm run build`, then open `http://<laptop>:8080` (the
 `web/dist`). Rebuild after changes; no bridge restart needed. On the bridge laptop, `make update`
 does the pull, install and build in one go (see the root README).
 
+## Deploy (Cloudflare)
+
+The public site `https://walk.connectedovals.com` is this app on a Cloudflare Worker (static
+assets only, `wrangler.jsonc`), built and deployed by Workers Builds on every push to `main`:
+`npm ci && npm run build:cloudflare`, then `npx wrangler deploy` (no wrangler dependency in the
+repo; the build image fetches it). Setup: [docs/cloudflare.md](../docs/cloudflare.md).
+
+Configuration per environment, all in Vite env files:
+
+| Where the page runs | Bridge URL | Control |
+|---|---|---|
+| served by the bridge (`http://<laptop>:8080`), `npm run build` | empty: same origin (`web/.env`, git-ignored) | yes, from localhost/LAN |
+| `npm run dev` | empty: Vite proxies to `BRIDGE_DEV_URL` | yes |
+| Cloudflare, `npm run build:cloudflare` (`--mode cloudflare`) | `web/.env.cloudflare` (tracked, nothing secret): the tunnel hostname | **view only** |
+
+A page with a bridge URL set is view-only by design: it connects without a client id, never
+asks for control, and shows the "view only" badge (the bridge refuses control through the
+tunnel anyway). Its GETs carry cookies (`credentials: 'include'`, for the Cloudflare Access
+cookie) and stay plain requests without custom headers, because Access refuses CORS preflights.
+A Cloudflare build variable of the same name overrides `.env.cloudflare`; the Cloudflare build
+has no Google key and the flat world only.
+
 ## Pages and modes
 
 - `/` walking view. `#/stats` stats page (streaks, bests, distance per day/week/month, history).

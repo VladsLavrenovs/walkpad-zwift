@@ -2,6 +2,8 @@
 .env
 .env.*
 !.env.example
+# Non-secret build settings for the Cloudflare deploy (see the file's header).
+!web/.env.cloudflare
 
 # Python / uv
 __pycache__/

@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
+from starlette.websockets import WebSocketDisconnect
 
 from walkpad_bridge.clock import ScaledClock
 from walkpad_bridge.config import Config, ServerConfig, StorageConfig
@@ -133,7 +134,37 @@ def test_cross_origin_pages_may_read_but_not_control(client: TestClient) -> None
     })
     assert preflight.status_code == 400  # the browser will not send the POST
     evil = client.get("/stats", headers={"Origin": "https://evil.example"})
-    assert "access-control-allow-origin" not in evil.headers
+    assert evil.status_code == 403
+    assert allowed.headers["access-control-allow-credentials"] == "true"  # the Access cookie
+
+
+@pytest.mark.parametrize(
+    ("origin", "ok"),
+    [
+        (None, True),  # curl, same-origin GETs
+        ("https://walk.connectedovals.com", True),
+        ("https://walkpad-bridge.connectedovals.com", True),
+        ("http://192.168.1.20:8080", True),  # the page the bridge serves on the LAN
+        ("http://localhost:5173", True),  # the Vite dev server
+        ("https://evil.example", False),
+        ("http://walk.connectedovals.com", False),  # wrong scheme
+        ("https://walk.connectedovals.com.evil.example", False),
+        ("null", False),
+    ],
+)
+def test_requests_from_other_websites_are_refused(client: TestClient, origin: str | None, ok: bool) -> None:
+    headers = {} if origin is None else {"Origin": origin}
+    assert (client.get("/status", headers=headers).status_code == 200) is ok
+    if ok:
+        with client.websocket_connect("/live", headers=headers) as ws:
+            assert "connected" in ws.receive_json()  # the first status message
+    else:
+        with pytest.raises(WebSocketDisconnect) as refused:
+            with client.websocket_connect("/live", headers=headers):
+                pass
+        assert refused.value.code == 1008
+        # Control from another site is refused before the control checks run.
+        assert client.post("/control/stop", headers={**H, "Origin": origin}).status_code == 403
 
 
 def test_serves_the_built_web_app(tmp_path: Path) -> None:

@@ -1,0 +1,15 @@
+// Cloudflare Worker serving the built web app as static assets (no Worker code), deployed by
+// Workers Builds from GitHub: see docs/cloudflare.md.
+{
+  "name": "walkpad-web",
+  "compatibility_date": "2026-09-01",
+  "assets": {
+    "directory": "./dist",
+    // Unknown paths get index.html (the app routes with #/..., so this is just a safety net).
+    "not_found_handling": "single-page-application"
+  },
+  "routes": [{ "pattern": "walk.connectedovals.com", "custom_domain": true }],
+  // Static assets only: no Worker invocations, no workers.dev URL that would bypass Access.
+  "workers_dev": false,
+  "preview_urls": false
+}

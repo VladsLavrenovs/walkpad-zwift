@@ -8,6 +8,11 @@ only takes rights away from it.
 Control requests must also carry a Host that names this machine (an IP address, localhost, this
 machine's hostname, or `control_hosts` from config). That stops DNS rebinding, where a web page
 from another site re-points its own hostname at the LAN address of this laptop.
+
+Every request and WebSocket that carries an `Origin` header (browsers add it) must also come from
+the app's own sites (`app_origins` in config) or from a page on this machine or the LAN
+(`origin_allowed`): another website open in the owner's browser can neither read live data nor
+open the WebSocket. Requests without an Origin (curl, the page's own same-origin GETs) pass.
 """
 
 from __future__ import annotations
@@ -81,3 +86,30 @@ def control_refusal(
     if not is_local_client(client_host, headers):
         return "belt control is only accepted from localhost/LAN (remote access is read-only)"
     return None
+
+
+def _private_or_this_machine(host: str, extra: Iterable[str]) -> bool:
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        me = socket.gethostname().lower()
+        return host in {"localhost", me, f"{me}.local", f"{me}.lan", *(h.lower() for h in extra)}
+    if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
+        ip = ip.ipv4_mapped
+    return ip.is_loopback or ip.is_private or ip.is_link_local
+
+
+def origin_allowed(origin: str | None, app_origins: Iterable[str], extra_hosts: Iterable[str] = ()) -> bool:
+    """Whether a browser page from `origin` may talk to the bridge at all (None: not a browser
+    cross-site request, allowed). Allowed: the app's own origins (exact match), and pages served
+    from localhost, a LAN address or this machine's name, on any port (the bridge itself, the
+    Vite dev server)."""
+    if origin is None or origin == "":
+        return True
+    origin = origin.strip().lower().rstrip("/")
+    if origin in {o.strip().lower().rstrip("/") for o in app_origins}:
+        return True
+    scheme, sep, rest = origin.partition("://")
+    if not sep or scheme not in ("http", "https") or not rest:
+        return False  # "null" (sandboxed or file pages) and anything odd
+    return _private_or_this_machine(_host_name(rest), extra_hosts)

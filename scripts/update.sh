@@ -45,6 +45,21 @@ have=$(node --version | sed 's/^v//; s/\..*//')
 [[ $have == "$want" ]] || echo "warning: Node $have, but web/.node-version says $want"
 (cd web && npm ci --no-audit --no-fund && npm run build)
 
+step "tunnel service"
+TUNNEL=walkpad-tunnel
+TUNNEL_DST=$HOME/.config/systemd/user/$TUNNEL.service
+if [[ ! -f $TUNNEL_DST ]]; then
+  echo "not installed (optional; see docs/cloudflare.md)"
+elif cmp -s "bridge/systemd/$TUNNEL.service" "$TUNNEL_DST"; then
+  echo "unit unchanged"
+else
+  # Restarting the tunnel only drops remote viewers for a moment; the belt is unaffected.
+  cp "bridge/systemd/$TUNNEL.service" "$TUNNEL_DST"
+  systemctl --user daemon-reload
+  systemctl --user restart "$TUNNEL"
+  echo "unit updated, tunnel restarted"
+fi
+
 step "bridge service"
 restart=$FORCE_RESTART
 if [[ -f $UNIT_DST ]] && ! cmp -s "$UNIT_SRC" "$UNIT_DST"; then

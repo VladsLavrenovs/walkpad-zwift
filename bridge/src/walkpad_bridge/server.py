@@ -36,7 +36,7 @@ from starlette.types import Receive, Scope, Send
 from pydantic import BaseModel, Field
 from starlette.websockets import WebSocketDisconnect
 
-from .access import control_refusal, is_local_client
+from .access import control_refusal, is_local_client, origin_allowed
 from .backend import BackendError
 from .config import Config
 from .service import BridgeService, ControlError, sample_message
@@ -123,9 +123,12 @@ def create_app(service: BridgeService, config: Config) -> FastAPI:
     app = FastAPI(title="WalkPad bridge", lifespan=lifespan)
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=list(config.server.cors_origins),
+        allow_origins=list(config.server.app_origins),
         allow_methods=["GET"],  # cross-origin pages may read, never control
+        allow_credentials=True,  # the Cloudflare Access cookie rides along
     )
+    # Outermost: refuse other websites before anything else runs (HTTP and WebSocket).
+    app.add_middleware(OriginGuard, app_origins=config.server.app_origins, extra_hosts=config.server.control_hosts)
 
     def control_client(
         request: Request,
@@ -431,3 +434,28 @@ async def _drain(websocket: WebSocket) -> None:
 def _finite(message: dict[str, Any]) -> dict[str, Any]:
     return {k: (None if isinstance(v, float) and not math.isfinite(v) else v)
             for k, v in message.items()}
+
+
+class OriginGuard:
+    """ASGI middleware: a request or WebSocket whose `Origin` is not allowed gets 403."""
+
+    def __init__(self, app: Any, app_origins: tuple[str, ...], extra_hosts: tuple[str, ...]) -> None:
+        self.app = app
+        self.app_origins = app_origins
+        self.extra_hosts = extra_hosts
+
+    async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
+        if scope["type"] in ("http", "websocket"):
+            origin = next((v.decode("latin-1") for k, v in scope["headers"] if k == b"origin"), None)
+            if not origin_allowed(origin, self.app_origins, self.extra_hosts):
+                log.warning("refused %s %s from origin %s", scope["type"], scope.get("path"), origin)
+                if scope["type"] == "websocket":
+                    await receive()  # websocket.connect
+                    await send({"type": "websocket.close", "code": 1008})  # before accept: HTTP 403
+                    return
+                body = b'{"detail":"origin not allowed"}'
+                await send({"type": "http.response.start", "status": 403,
+                            "headers": [(b"content-type", b"application/json"), (b"content-length", str(len(body)).encode())]})
+                await send({"type": "http.response.body", "body": body})
+                return
+        await self.app(scope, receive, send)

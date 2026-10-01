@@ -61,15 +61,16 @@ class ServerConfig:
     # Extra Host names allowed for control requests (IP literals, localhost and this machine's
     # hostname are always allowed). Guards against DNS rebinding.
     control_hosts: tuple[str, ...] = ()
-    # Origins allowed to read (GET, WebSocket) cross-origin, e.g. the deployed web app.
-    cors_origins: tuple[str, ...] = ("https://walk.connectedovals.com",)
+    # The app's own web origins: they may read (GET, WebSocket) cross-origin. Any other browser
+    # Origin is refused, except pages on localhost / the LAN (see access.origin_allowed).
+    app_origins: tuple[str, ...] = ("https://walk.connectedovals.com", "https://walkpad-bridge.connectedovals.com")
     # Controlling client gone: wait this long for it to reconnect, then ramp down and stop.
     client_grace_s: float = 5.0
     reconnect_interval_s: float = 5.0  # pad unreachable: retry this often
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "control_hosts", tuple(self.control_hosts))
-        object.__setattr__(self, "cors_origins", tuple(self.cors_origins))
+        object.__setattr__(self, "app_origins", tuple(self.app_origins))
         _positive("server", self, "client_grace_s", "reconnect_interval_s")
         _port("server", self.port)
 

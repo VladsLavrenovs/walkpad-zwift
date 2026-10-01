@@ -227,7 +227,9 @@ export class BridgeClient {
   }
 
   async get<T>(path: string): Promise<T> {
-    const res = await fetch(this.url(path))
+    // A plain GET (no custom headers: no CORS preflight, which Cloudflare Access would refuse),
+    // with cookies: the Access cookie when the bridge is on another hostname.
+    const res = await fetch(this.url(path), { credentials: 'include' })
     if (!res.ok) throw new Error(`${path}: HTTP ${res.status}`)
     return (await res.json()) as T
   }

@@ -2,7 +2,7 @@ import socket
 
 import pytest
 
-from walkpad_bridge.access import control_refusal, host_is_this_machine, is_local_client
+from walkpad_bridge.access import control_refusal, host_is_this_machine, is_local_client, origin_allowed
 
 
 @pytest.mark.parametrize(
@@ -46,3 +46,21 @@ def test_control_refusal() -> None:
     assert control_refusal("127.0.0.1", tunnel, allow_remote=True) is None  # explicit opt-in
     rebinding = {"host": "evil.example"}
     assert "address this machine" in control_refusal("192.168.1.30", rebinding, allow_remote=True)
+
+
+APP = ("https://walk.connectedovals.com", "https://walkpad-bridge.connectedovals.com")
+
+
+@pytest.mark.parametrize(
+    ("origin", "ok"),
+    [
+        (None, True), ("", True),
+        ("https://walk.connectedovals.com", True), ("https://WALK.connectedovals.com/", True),
+        ("http://127.0.0.1:8080", True), ("http://[::1]:5173", True), ("http://10.0.0.7:8080", True),
+        (f"http://{socket.gethostname()}.local:8080", True), ("http://pad.home:8080", True),
+        ("https://evil.example", False), ("http://8.8.8.8:8080", False), ("null", False),
+        ("file://", False), ("https://connectedovals.com", False),
+    ],
+)
+def test_origin_allowed(origin: str | None, ok: bool) -> None:
+    assert origin_allowed(origin, APP, ["pad.home"]) is ok

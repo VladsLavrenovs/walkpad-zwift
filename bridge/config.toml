@@ -33,8 +33,10 @@ web_dist = "../web/dist"
 allow_remote_control = false
 # Extra Host names allowed for control, besides IP addresses, localhost and this machine's name.
 control_hosts = []
-# Origins that may read live data and stats cross-origin (the deployed web app).
-cors_origins = ["https://walk.connectedovals.com"]
+# The app's own web origins (the Cloudflare deploy and the tunnel hostname): they may read live
+# data and stats. Requests from any other website are refused (403); pages served from
+# localhost or the LAN are always allowed.
+app_origins = ["https://walk.connectedovals.com", "https://walkpad-bridge.connectedovals.com"]
 # Controlling page gone (refresh, Wi-Fi blip): wait this long, then ramp the belt down and stop.
 client_grace_s = 5.0
 # Pad unreachable (off, or the phone app has it): retry this often.

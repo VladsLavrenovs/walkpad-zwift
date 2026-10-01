@@ -186,3 +186,11 @@ def test_web_app_built_after_start_is_served_without_restart(tmp_path: Path) -> 
         (dist / "index.html").write_text("<h1>WalkPad</h1>")
         assert c.get("/").text == "<h1>WalkPad</h1>"
         assert c.get("/sessions").status_code == 200
+
+
+def test_non_finite_numbers_get_a_clean_422(client: TestClient) -> None:
+    # NaN / Infinity in a body used to crash the error response itself (500).
+    for raw in ('{"kmh": NaN}', '{"kmh": Infinity}'):
+        r = client.post("/control/speed", content=raw, headers={**H, "Content-Type": "application/json"})
+        assert r.status_code == 422
+        assert r.json()["detail"][0]["loc"] == ["body", "kmh"]

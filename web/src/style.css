@@ -230,6 +230,16 @@ button:disabled { cursor: not-allowed; opacity: 0.45; }
 .worldmap-page header .link { margin-left: auto; }
 .worldmap-page .wm-seed { width: 110px; }
 .wm-info { font-size: 13px; }
+.wm-title { font-size: 14px; }
+.wm-star { color: #f2c94c; }
+.wm-worlds { position: absolute; top: 56px; right: 16px; z-index: 1000; width: min(560px, calc(100% - 32px)); max-height: 60vh; overflow: auto;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px; display: flex; flex-direction: column; gap: 8px; }
+.wm-worlds[hidden] { display: none; }
+.wm-world { display: grid; grid-template-columns: 1fr auto; gap: 2px 12px; padding: 8px; border-radius: 8px; background: rgb(255 255 255 / 0.03); }
+.wm-world.active { outline: 1px solid #f2c94c66; }
+.wm-world-name { font-weight: 600; }
+.wm-world .muted { grid-column: 1; font-size: 12px; }
+.wm-world-actions { grid-column: 2; grid-row: 1 / span 2; display: flex; gap: 6px; align-items: center; }
 .wm-map { flex: 1; }
 .wm-map.leaflet-container { background: #1c3d63; }
 .wm-place { white-space: nowrap; pointer-events: auto; }

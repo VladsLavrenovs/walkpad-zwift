@@ -29,6 +29,7 @@ from pathlib import Path
 from typing import Annotated, Any, Literal
 
 from fastapi import Body, Depends, FastAPI, Header, HTTPException, Query, Request, WebSocket
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
@@ -48,6 +49,7 @@ from .routes import clean_points, parse_gpx, route_length_m
 from .youtube import parse_youtube_url
 
 MAX_GPX_BYTES = 5_000_000
+MAX_WORLD_BYTES = 32_000_000  # a saved world's snapshot (gzip); real ones are a few MB
 
 log = logging.getLogger(__name__)
 
@@ -101,6 +103,21 @@ class RouteUpdate(BaseModel):
     start_biome: StartBiome | None = None
 
 
+class WorldRename(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
+
+
+class ActiveWorld(BaseModel):
+    id: int | None
+
+
+class WorldState(BaseModel):
+    x: float = Field(ge=-1e6, le=1e6, allow_inf_nan=False)
+    z: float = Field(ge=-1e6, le=1e6, allow_inf_nan=False)
+    heading: float = Field(ge=-1e3, le=1e3, allow_inf_nan=False)
+    walked_m: float = Field(ge=0, le=1e9, allow_inf_nan=False)
+
+
 class ActiveRoute(BaseModel):
     id: int | None
 
@@ -121,6 +138,13 @@ def create_app(service: BridgeService, config: Config) -> FastAPI:
             await service.close()
 
     app = FastAPI(title="WalkPad bridge", lifespan=lifespan)
+
+    @app.exception_handler(RequestValidationError)
+    async def invalid_request(_request: Request, exc: RequestValidationError) -> JSONResponse:
+        # Not echoing the input: a NaN or Infinity there cannot be encoded as JSON (FastAPI's
+        # default handler would turn a clean 422 into a 500).
+        errors = [{k: e[k] for k in ("loc", "msg", "type") if k in e} for e in exc.errors()]
+        return JSONResponse({"detail": errors}, status_code=422)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=list(config.server.app_origins),
@@ -383,6 +407,61 @@ def create_app(service: BridgeService, config: Config) -> FastAPI:
             raise HTTPException(404, "no such route")
         service.route_changed()
         return {"route": service.route}
+
+    # --- open world: saved worlds (anyone may read; changes are local-only) --------------------
+
+    @app.get("/worlds")
+    async def worlds() -> dict[str, Any]:
+        return {"worlds": service.store.list_worlds()}
+
+    @app.get("/worlds/{world_id}/snapshot")
+    async def world_snapshot(world_id: int) -> Response:
+        data = service.store.world_snapshot(world_id)
+        if data is None:
+            raise HTTPException(404, "no such world")
+        # Ids can be reused after a delete: the client asks every time (no caching by URL).
+        return Response(data, media_type="application/octet-stream", headers={"Cache-Control": "no-cache"})
+
+    @app.post("/worlds", status_code=201)
+    async def save_world(
+        request: Request,
+        name: Annotated[str, Query(min_length=1, max_length=80)],
+        seed: Annotated[int, Query(ge=0, le=2**31 - 1)],
+        gen_version: Annotated[int, Query(ge=1, le=10_000)],
+        _client: str = client_dep,
+    ) -> dict[str, Any]:
+        """Save a generated world: the body is its snapshot (gzip) as the web app made it."""
+        body = await request.body()
+        if len(body) > MAX_WORLD_BYTES:
+            raise HTTPException(413, f"world snapshot larger than {MAX_WORLD_BYTES // 1_000_000} MB")
+        if body[:2] != b"\x1f\x8b":
+            raise HTTPException(422, "a world snapshot is gzip data")
+        return service.store.add_world(name.strip(), seed, gen_version, body, service.wall_clock())
+
+    @app.patch("/worlds/{world_id}")
+    async def rename_world(world_id: int, body: WorldRename, _client: str = client_dep) -> dict[str, Any]:
+        world = service.store.rename_world(world_id, body.name.strip())
+        if world is None:
+            raise HTTPException(404, "no such world")
+        return world
+
+    @app.put("/worlds/active")
+    async def set_active_world(body: Annotated[ActiveWorld, Body()], _client: str = client_dep) -> dict[str, Any]:
+        if not service.store.set_active_world(body.id):
+            raise HTTPException(404, "no such world")
+        return {"worlds": service.store.list_worlds()}
+
+    @app.put("/worlds/{world_id}/state")
+    async def set_world_state(world_id: int, body: WorldState, _client: str = client_dep) -> dict[str, Any]:
+        world = service.store.set_world_state(world_id, body.x, body.z, body.heading, body.walked_m, service.wall_clock())
+        if world is None:
+            raise HTTPException(404, "no such world")
+        return world
+
+    @app.delete("/worlds/{world_id}", status_code=204)
+    async def delete_world(world_id: int, _client: str = client_dep) -> None:
+        if not service.store.delete_world(world_id):
+            raise HTTPException(404, "no such world")
 
     @app.delete("/routes/{route_id}", status_code=204)
     async def delete_route(route_id: int, _client: str = client_dep) -> None:

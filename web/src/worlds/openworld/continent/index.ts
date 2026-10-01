@@ -15,6 +15,8 @@ export * from './types'
 export { biomeWeightsFrom, type OwWeights } from './climate'
 
 export const GRID_N = 512
+/** Bump when a change to the generator changes what a seed produces (saved worlds keep theirs). */
+export const GENERATOR_VERSION = 1
 
 export function generateContinent(seed: number, n = GRID_N): Continent {
   const cell = WORLD_M / n

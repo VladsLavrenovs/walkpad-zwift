@@ -31,6 +31,24 @@ export interface RouteSummary {
   completed_at: number | null
 }
 
+/** An open-world saved world (the snapshot itself is fetched separately). */
+export interface SavedWorld {
+  id: number
+  name: string
+  seed: number
+  gen_version: number
+  /** Snapshot size in bytes. */
+  size: number
+  active: boolean
+  created_at: number
+  /** Where the player is (null: not started there yet). */
+  x: number | null
+  z: number | null
+  heading: number | null
+  walked_m: number
+  played_at: number | null
+}
+
 export interface Route extends RouteSummary {
   source: 'gpx' | 'ors' | 'trail'
   active: boolean
@@ -336,6 +354,51 @@ export class BridgeClient {
     const data = (await res.json().catch(() => ({}))) as Route & { detail?: unknown }
     if (!res.ok) throw new ControlError(typeof data.detail === 'string' ? data.detail : `HTTP ${res.status}`, res.status)
     return data
+  }
+
+  // --- open world: saved worlds (reading is open; changes are local-only) ------------------
+
+  async worlds(): Promise<SavedWorld[]> {
+    return (await this.get<{ worlds: SavedWorld[] }>('/worlds')).worlds
+  }
+
+  /** A saved world's snapshot (gzip bytes, see openworld/continent/snapshot.ts). */
+  async worldSnapshot(id: number): Promise<Uint8Array> {
+    const res = await fetch(this.url(`/worlds/${id}/snapshot`), { credentials: 'include' })
+    if (!res.ok) throw new Error(`world ${id}: HTTP ${res.status}`)
+    return new Uint8Array(await res.arrayBuffer())
+  }
+
+  async saveWorld(name: string, seed: number, genVersion: number, snapshot: Uint8Array): Promise<SavedWorld> {
+    if (!this.client) throw new ControlError('view only', 403)
+    const query = `name=${encodeURIComponent(name)}&seed=${seed}&gen_version=${genVersion}`
+    const res = await fetch(this.url(`/worlds?${query}`), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/octet-stream', 'X-Client-Id': this.client },
+      body: snapshot as BodyInit,
+    })
+    if (res.status === 405 || res.status === 404) {
+      throw new ControlError('The bridge is older than this page. Restart it: ./scripts/update.sh --restart', res.status)
+    }
+    const data = (await res.json().catch(() => ({}))) as SavedWorld & { detail?: unknown }
+    if (!res.ok) throw new ControlError(typeof data.detail === 'string' ? data.detail : `HTTP ${res.status}`, res.status)
+    return data
+  }
+
+  renameWorld(id: number, name: string): Promise<SavedWorld> {
+    return this.write('PATCH', `/worlds/${id}`, { name })
+  }
+
+  async setActiveWorld(id: number | null): Promise<SavedWorld[]> {
+    return (await this.write<{ worlds: SavedWorld[] }>('PUT', '/worlds/active', { id })).worlds
+  }
+
+  deleteWorld(id: number): Promise<void> {
+    return this.write('DELETE', `/worlds/${id}`)
+  }
+
+  setWorldState(id: number, state: { x: number; z: number; heading: number; walked_m: number }, keepalive = false): Promise<SavedWorld> {
+    return this.write('PUT', `/worlds/${id}/state`, state, keepalive)
   }
 
   planRoute(waypoints: [number, number][]): Promise<{ points: [number, number][]; distance_m: number }> {

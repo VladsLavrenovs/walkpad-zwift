@@ -67,6 +67,23 @@ CREATE TABLE IF NOT EXISTS routes (
     completed_at   REAL
 );
 
+-- v7: open-world saved worlds: a generated continent kept as the web app snapshotted it (so
+-- later generator changes never reshape it), and where the player is in it.
+CREATE TABLE IF NOT EXISTS worlds (
+    id          INTEGER PRIMARY KEY,
+    name        TEXT NOT NULL,
+    seed        INTEGER NOT NULL,
+    gen_version INTEGER NOT NULL,          -- generator version that made it
+    snapshot    BLOB NOT NULL,             -- gzip, format: web/src/worlds/openworld/continent/snapshot.ts
+    active      INTEGER NOT NULL DEFAULT 0, -- at most one: the world the Open world walks in
+    created_at  REAL NOT NULL,
+    x           REAL,                      -- player position (metres) and heading (radians); NULL: not started
+    z           REAL,
+    heading     REAL,
+    walked_m    REAL NOT NULL DEFAULT 0,
+    played_at   REAL
+);
+
 -- v4: granted Google 3D tiles sessions, for the cost guard (tiles3d.py).
 CREATE TABLE IF NOT EXISTS tiles3d_sessions (
     id         INTEGER PRIMARY KEY,
@@ -77,9 +94,9 @@ CREATE TABLE IF NOT EXISTS tiles3d_sessions (
 );
 CREATE INDEX IF NOT EXISTS tiles3d_sessions_month ON tiles3d_sessions (month, day);
 """
-# v1 -> v4 only add tables, which CREATE ... IF NOT EXISTS does on open; v5 and v6 add columns
-# (MIGRATIONS below).
-SCHEMA_VERSION = 6
+# v1 -> v4 and v7 only add tables, which CREATE ... IF NOT EXISTS does on open; v5 and v6 add
+# columns (MIGRATIONS below).
+SCHEMA_VERSION = 7
 # (version, column, ALTER statement): applied when an older database lacks the column.
 MIGRATIONS = [
     (5, ("routes", "seed"), "ALTER TABLE routes ADD COLUMN seed INTEGER"),
@@ -347,6 +364,62 @@ class Store:
             )
         return True, None, today + 1, this_month + 1
 
+    # --- open-world saved worlds -----------------------------------------------------------------
+
+    def add_world(self, name: str, seed: int, gen_version: int, snapshot: bytes, now: float) -> dict[str, Any]:
+        """Save a world; the first one saved becomes the active one."""
+        with self.db:
+            self.db.execute("BEGIN")
+            first = self.db.execute("SELECT 1 FROM worlds LIMIT 1").fetchone() is None
+            cur = self.db.execute(
+                "INSERT INTO worlds (name, seed, gen_version, snapshot, active, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                (name, seed, gen_version, snapshot, 1 if first else 0, now),
+            )
+        assert cur.lastrowid is not None
+        world = self.get_world(cur.lastrowid)
+        assert world is not None
+        return world
+
+    def list_worlds(self) -> list[dict[str, Any]]:
+        rows = self.db.execute(f"SELECT {WORLD_SUMMARY} FROM worlds ORDER BY active DESC, "
+                               "played_at IS NULL, played_at DESC, created_at DESC")
+        return [_world(r) for r in rows]
+
+    def get_world(self, id: int) -> dict[str, Any] | None:
+        row = self.db.execute(f"SELECT {WORLD_SUMMARY} FROM worlds WHERE id = ?", (id,)).fetchone()
+        return None if row is None else _world(row)
+
+    def world_snapshot(self, id: int) -> bytes | None:
+        row = self.db.execute("SELECT snapshot FROM worlds WHERE id = ?", (id,)).fetchone()
+        return None if row is None else bytes(row[0])
+
+    def rename_world(self, id: int, name: str) -> dict[str, Any] | None:
+        self.db.execute("UPDATE worlds SET name = ? WHERE id = ?", (name, id))
+        return self.get_world(id)
+
+    def set_active_world(self, id: int | None) -> bool:
+        """Make `id` the active world (None: none). False if there is no such world."""
+        with self.db:
+            self.db.execute("BEGIN")
+            if id is not None and self.db.execute("SELECT 1 FROM worlds WHERE id = ?", (id,)).fetchone() is None:
+                return False
+            self.db.execute("UPDATE worlds SET active = 0 WHERE active = 1")
+            if id is not None:
+                self.db.execute("UPDATE worlds SET active = 1 WHERE id = ?", (id,))
+        return True
+
+    def delete_world(self, id: int) -> bool:
+        return self.db.execute("DELETE FROM worlds WHERE id = ?", (id,)).rowcount > 0
+
+    def set_world_state(self, id: int, x: float, z: float, heading: float, walked_m: float,
+                        now: float) -> dict[str, Any] | None:
+        """Where the player is in a world. Walked metres only ever grow."""
+        self.db.execute(
+            "UPDATE worlds SET x = ?, z = ?, heading = ?, walked_m = MAX(walked_m, ?), played_at = ? WHERE id = ?",
+            (x, z, heading, walked_m, now, id),
+        )
+        return self.get_world(id)
+
     def finished_sessions(self) -> list[dict[str, Any]]:
         rows = self.db.execute("SELECT * FROM sessions WHERE ended_at IS NOT NULL ORDER BY started_at")
         return [_session(r) for r in rows]
@@ -354,6 +427,16 @@ class Store:
 
 ROUTE_SUMMARY = ("id, name, source, seed, start_biome, distance_m, progress_m, active, created_at, last_walked_at,"
                  " completed_at")
+
+
+WORLD_SUMMARY = ("id, name, seed, gen_version, length(snapshot) AS size, active, created_at, x, z, heading,"
+                 " walked_m, played_at")
+
+
+def _world(row: sqlite3.Row) -> dict[str, Any]:
+    world = dict(row)
+    world["active"] = bool(world["active"])
+    return world
 
 
 def _route(row: sqlite3.Row) -> dict[str, Any]:

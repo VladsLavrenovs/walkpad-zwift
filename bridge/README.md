@@ -117,6 +117,16 @@ real pad. Stopping the service (Ctrl+C, SIGTERM) stops the belt and closes the o
 | `PATCH /routes/{id} {"name"?, "progress_m"?, "seed"?, "start_biome"?}` | localhost/LAN | rename, set/reset progress, or give a trail a new look (the fantasy world's "New world") |
 | `PUT /routes/active {"id": n or null}` | localhost/LAN | the route walking moves along |
 | `DELETE /routes/{id}` | localhost/LAN | remove |
+| `GET /worlds` | anyone | open-world saved worlds (no snapshots), active first: name, seed, generator version, size, position, walked metres |
+| `GET /worlds/{id}/snapshot` | anyone | the world's snapshot (gzip bytes, as the web app made it) |
+| `POST /worlds?name=&seed=&gen_version=` (body: snapshot, gzip) | localhost/LAN | save a world; the first one saved becomes active; 32 MB max |
+| `PATCH /worlds/{id} {"name"}` | localhost/LAN | rename |
+| `PUT /worlds/active {"id": n or null}` | localhost/LAN | the world the Open world walks in |
+| `PUT /worlds/{id}/state {"x", "z", "heading", "walked_m"}` | localhost/LAN | where the player is (walked metres never go back) |
+| `DELETE /worlds/{id}` | localhost/LAN | remove |
+
+Invalid input is a 422 with `{"detail": [{"loc", "msg", "type"}]}` (the offending value is not
+echoed, so a NaN or Infinity in a body cannot break the error response).
 
 Control responses are the new status plus `applied_target_kmh`: the target **after** the cap, not
 the request echoed. Errors: 403 not allowed from here, 409 not possible now (no WebSocket for this
@@ -148,8 +158,8 @@ reports it stopped or the pad connection drops. A connection that comes back wit
 the pad's counters still running resumes the same session instead of starting a second one. Totals come from the pad's counters, carried
 across the resets the pad does while slowing down. At most one sample per second is stored.
 Sessions under `min_session_s` (10 s) are dropped. A crash leaves correct totals; the session is
-closed on the next start. Database: `bridge/data/walkpad.sqlite` (schema v6: older databases gain
-the `videos`, `routes` and `tiles3d_sessions` tables and the `routes.seed` and `routes.start_biome`
+closed on the next start. Database: `bridge/data/walkpad.sqlite` (schema v7: older databases gain
+the `videos`, `routes`, `tiles3d_sessions` and `worlds` tables and the `routes.seed` and `routes.start_biome`
 columns on the next start; sessions are untouched).
 
 **Stats**: local time of the laptop. A streak day needs 60 s of walking; the current streak

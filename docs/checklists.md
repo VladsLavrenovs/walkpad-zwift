@@ -64,6 +64,9 @@ possible. Tick them off there.
 - [ ] Zooming in shows the smaller places' names; the arrow keys do not move the map (they
       still change the belt speed, as everywhere).
 - [ ] Back to walking: the other worlds (Fantasy trail, YouTube, ...) are unchanged.
+- [ ] Saved worlds: "Save this world" on a seed you like, it gets ★ (first one); save a second,
+      "Walk here" moves the ★; reload: the map opens on the ★ world. On the public site only
+      "View" is offered.
 
 ## Prompt 8 (Cloudflare: Workers deploy, Tunnel, Access) — setup: [cloudflare.md](cloudflare.md)
 

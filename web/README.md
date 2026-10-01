@@ -226,7 +226,15 @@ Random. Generation runs in a Web Worker (about 1 s).
   rivers, roads, bridges, places and province names on top; smaller places' names appear as
   you zoom in; legend and scale bar. Arrow keys never pan it (they are belt speed).
 
-Next (1b): walking the continent in 3D: steering with A/D, position saved on the bridge.
+**Saved worlds** (start of milestone 1b): try seeds, then **Save this world** on the one you
+like. It is kept on the bridge as a snapshot of what was generated (`continent/snapshot.ts`:
+heights to 10 cm, water, biomes, places, roads, rivers, provinces; about 1 MB gzip), so later
+changes to the generator never reshape it; each records the generator version that made it.
+**My worlds** lists them: View, **Walk here** (the active world, marked ★, is the one the Open
+world will walk in; the first one saved is active), Rename, Delete. The map opens on the active
+world. Saving and switching need the local page; the public site can only look.
+
+Next (rest of 1b): walking the active world in 3D: steering with A/D, position saved per world.
 
 | Module | Role |
 |---|---|
@@ -237,6 +245,7 @@ Next (1b): walking the continent in 3D: steering with A/D, position saved on the
 | `openworld/continent/roads.ts`, `smooth.ts` | Road network, curve smoothing |
 | `openworld/continent/index.ts` | `generateContinent(seed)`, sampling helpers; unit-tested (`continent.test.ts`) |
 | `openworld/continent/worker.ts` | Runs the generator off the main thread |
+| `openworld/continent/snapshot.ts` | A saved world as compact bytes (encode / decode); unit-tested |
 | `openworld/mapdraw.ts`, `mappage.ts` | The world map page |
 
 ## Real world (3D) world

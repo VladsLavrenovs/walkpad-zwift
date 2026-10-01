@@ -186,7 +186,7 @@ export class App {
     if (this.worldMapLoading) return
     this.worldMapLoading = true
     void import('./worlds/openworld/mappage').then(({ WorldMapPage }) => {
-      this.worldMap = new WorldMapPage(this.root)
+      this.worldMap = new WorldMapPage(this.root, this.bridge, () => this.controlAllowed && !this.config.obs && !this.config.viewOnly)
       if (location.hash === '#/worldmap') this.worldMap.show()
     }).catch((err) => this.toast(`World map failed to load: ${String(err)}`, 8000))
   }

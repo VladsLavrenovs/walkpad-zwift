@@ -2,11 +2,15 @@
  * World map page (#/worldmap): the whole open-world continent of a seed, top-down, nothing
  * hidden. Terrain (biomes, relief, sea, lakes, province borders) is drawn into map tiles from the
  * generator; rivers, roads, bridges, places and province names go on top. Generation runs in a
- * Web Worker. For judging the world while it is being built; the game's map will reuse this.
+ * Web Worker. Try seeds, save the world you like (a snapshot on the bridge: later generator
+ * changes never reshape it), keep several, and pick the one you walk in. Saving and switching
+ * are local-only; the public (view-only) site can look.
  */
 
+import type { BridgeClient, SavedWorld } from '../../bridge'
 import { L } from '../../routes/map'
-import { type Continent, OW_BIOMES, OW_BIOME_NAMES, type Place, type PlaceKind, WORLD_M } from './continent'
+import { type Continent, GENERATOR_VERSION, OW_BIOMES, OW_BIOME_NAMES, type Place, type PlaceKind, WORLD_M } from './continent'
+import { decodeSnapshot, encodeSnapshot } from './continent/snapshot'
 import { RIVER_FLOW } from './continent/hydro'
 import { MAP_COLORS, WATER_COLOR, colorAt } from './mapdraw'
 
@@ -45,36 +49,62 @@ class TerrainLayer extends L.GridLayer {
   }
 }
 
+/** What the map shows: a seed being tried out, or a saved world. */
+type Shown = { kind: 'preview'; seed: number; world: Continent } | { kind: 'saved'; saved: SavedWorld; world: Continent }
+
 export class WorldMapPage {
   private readonly el: HTMLDivElement
+  private readonly bridge: BridgeClient
+  private readonly canEdit: () => boolean
   private map: L.Map | null = null
   private layers: L.Layer[] = []
   private worker: Worker | null = null
   private info!: HTMLSpanElement
+  private title!: HTMLSpanElement
   private seedInput!: HTMLInputElement
+  private saveButton!: HTMLButtonElement
+  private mineButton!: HTMLButtonElement
+  private panel!: HTMLDivElement
   private generating = 0
+  private shown: Shown | null = null
+  private saved: SavedWorld[] = []
 
-  constructor(parent: HTMLElement) {
+  constructor(parent: HTMLElement, bridge: BridgeClient, canEdit: () => boolean) {
+    this.bridge = bridge
+    this.canEdit = canEdit
     this.el = document.createElement('div')
     this.el.className = 'worldmap-page'
     this.el.hidden = true
     this.el.innerHTML = `
       <header>
         <h1>World map</h1>
+        <span class="wm-title"></span>
         <label>seed <input type="number" class="wm-seed" min="1" step="1"></label>
         <button type="button" class="wm-go">Generate</button>
         <button type="button" class="wm-random">Random</button>
+        <button type="button" class="wm-save" hidden>Save this world</button>
+        <button type="button" class="wm-mine">My worlds</button>
         <span class="wm-info muted"></span>
         <a href="#/" class="link">Back to walking</a>
       </header>
+      <div class="wm-worlds" hidden></div>
       <div class="wm-map"></div>`
     parent.append(this.el)
     this.info = this.el.querySelector('.wm-info')!
+    this.title = this.el.querySelector('.wm-title')!
     this.seedInput = this.el.querySelector('.wm-seed')!
+    this.saveButton = this.el.querySelector('.wm-save')!
+    this.mineButton = this.el.querySelector('.wm-mine')!
+    this.panel = this.el.querySelector('.wm-worlds')!
     this.el.querySelector<HTMLButtonElement>('.wm-go')!.onclick = () => this.generate(Number(this.seedInput.value) || 1)
     this.el.querySelector<HTMLButtonElement>('.wm-random')!.onclick = () => this.generate(1 + Math.floor(Math.random() * 999_999))
     this.seedInput.onkeydown = (e) => {
       if (e.key === 'Enter') this.generate(Number(this.seedInput.value) || 1)
+    }
+    this.saveButton.onclick = () => void this.saveShown()
+    this.mineButton.onclick = () => {
+      this.panel.hidden = !this.panel.hidden
+      if (!this.panel.hidden) void this.refreshList()
     }
   }
 
@@ -96,20 +126,32 @@ export class WorldMapPage {
       this.legend().addTo(this.map)
       this.map.on('zoomend', () => this.zoomClass())
       this.zoomClass()
-      let seed = 1
-      try {
-        seed = Number(localStorage.getItem(SEED_KEY)) || 1
-      } catch {
-        /* ignore */
-      }
-      this.generate(seed)
+      void this.start()
     } else {
       this.map.invalidateSize()
+      void this.refreshList()
     }
   }
 
   hide(): void {
     this.el.hidden = true
+  }
+
+  /** First visit: the world you walk in, if one is saved; otherwise the last seed tried. */
+  private async start(): Promise<void> {
+    await this.refreshList()
+    const active = this.saved.find((w) => w.active)
+    if (active) {
+      await this.openSaved(active)
+      return
+    }
+    let seed = 1
+    try {
+      seed = Number(localStorage.getItem(SEED_KEY)) || 1
+    } catch {
+      /* ignore */
+    }
+    this.generate(seed)
   }
 
   private generate(seed: number): void {
@@ -127,15 +169,133 @@ export class WorldMapPage {
     this.worker.onmessage = (e: MessageEvent<Continent>) => {
       if (job !== this.generating) return
       const world = e.data
-      const s = world.stats
-      this.info.textContent =
-        `${Math.round(performance.now() - t0)} ms · land ${s.land_pct}% · ${s.rivers} rivers · ${s.lakes} lakes · ` +
-        `${s.waterfalls} waterfalls · ${world.places.length} places · ${world.provinces.length} provinces · ${s.roads} roads`
+      this.info.textContent = `${Math.round(performance.now() - t0)} ms · ${summary(world)}`
+      this.shown = { kind: 'preview', seed, world }
+      this.renderTitle()
       this.draw(world)
       this.worker?.terminate()
       this.worker = null
     }
     this.worker.postMessage({ seed })
+  }
+
+  private async openSaved(saved: SavedWorld): Promise<void> {
+    const job = ++this.generating
+    this.worker?.terminate()
+    this.info.textContent = `loading ${saved.name}…`
+    try {
+      const { continent } = await decodeSnapshot(await this.bridge.worldSnapshot(saved.id))
+      if (job !== this.generating) return
+      this.shown = { kind: 'saved', saved, world: continent }
+      this.seedInput.value = String(saved.seed)
+      this.info.textContent = summary(continent)
+      this.renderTitle()
+      this.draw(continent)
+    } catch (err) {
+      this.info.textContent = `Could not load ${saved.name}: ${err instanceof Error ? err.message : String(err)}`
+    }
+  }
+
+  private renderTitle(): void {
+    const shown = this.shown
+    if (!shown) return
+    if (shown.kind === 'saved') {
+      const s = shown.saved
+      this.title.innerHTML = `${s.active ? '<b class="wm-star" title="the world you walk in">★</b> ' : ''}<b>${escapeHtml(s.name)}</b>` +
+        ` <span class="muted">saved · seed ${s.seed} · generator v${s.gen_version}</span>`
+    } else {
+      this.title.innerHTML = `<b>Preview</b> <span class="muted">seed ${shown.seed} · not saved</span>`
+    }
+    this.saveButton.hidden = !(shown.kind === 'preview' && this.canEdit())
+  }
+
+  private async refreshList(): Promise<void> {
+    try {
+      this.saved = await this.bridge.worlds()
+    } catch {
+      this.saved = []
+    }
+    this.mineButton.textContent = `My worlds (${this.saved.length})`
+    if (this.shown?.kind === 'saved') {
+      const id = this.shown.saved.id
+      const fresh = this.saved.find((w) => w.id === id)
+      if (fresh) this.shown = { ...this.shown, saved: fresh }
+    }
+    this.renderTitle()
+    this.renderList()
+  }
+
+  private renderList(): void {
+    const edit = this.canEdit()
+    if (this.saved.length === 0) {
+      this.panel.innerHTML = `<p class="muted">No saved worlds yet. Try seeds, then “Save this world” on the one you like.
+        The first world you save is the one you walk in.</p>`
+      return
+    }
+    this.panel.replaceChildren(...this.saved.map((w) => {
+      const row = document.createElement('div')
+      row.className = `wm-world${w.active ? ' active' : ''}`
+      const walked = w.walked_m > 0 ? ` · walked ${(w.walked_m / 1000).toFixed(1)} km` : ''
+      row.innerHTML = `
+        <span class="wm-world-name">${w.active ? '★ ' : ''}${escapeHtml(w.name)}</span>
+        <span class="muted">seed ${w.seed} · v${w.gen_version} · ${(w.size / 1e6).toFixed(1)} MB${walked}</span>
+        <span class="wm-world-actions">
+          <button type="button" data-a="view">View</button>
+          ${edit && !w.active ? '<button type="button" data-a="walk">Walk here</button>' : ''}
+          ${edit ? '<button type="button" data-a="rename">Rename</button><button type="button" data-a="delete">Delete</button>' : ''}
+        </span>`
+      row.querySelectorAll<HTMLButtonElement>('button').forEach((b) => {
+        b.onclick = () => void this.act(b.dataset.a!, w)
+      })
+      return row
+    }))
+  }
+
+  private async act(action: string, w: SavedWorld): Promise<void> {
+    try {
+      if (action === 'view') {
+        this.panel.hidden = true
+        await this.openSaved(w)
+      } else if (action === 'walk') {
+        this.saved = await this.bridge.setActiveWorld(w.id)
+        await this.refreshList()
+      } else if (action === 'rename') {
+        const name = window.prompt('New name for this world', w.name)?.trim()
+        if (!name) return
+        await this.bridge.renameWorld(w.id, name.slice(0, 80))
+        await this.refreshList()
+      } else if (action === 'delete') {
+        if (!window.confirm(`Delete “${w.name}”? Your place in it is lost; the seed can make it again only with the same generator version.`)) return
+        await this.bridge.deleteWorld(w.id)
+        if (this.shown?.kind === 'saved' && this.shown.saved.id === w.id) {
+          this.shown = { kind: 'preview', seed: w.seed, world: this.shown.world }
+        }
+        await this.refreshList()
+      }
+    } catch (err) {
+      this.info.textContent = err instanceof Error ? err.message : String(err)
+    }
+  }
+
+  private async saveShown(): Promise<void> {
+    const shown = this.shown
+    if (shown?.kind !== 'preview') return
+    const city = shown.world.places.find((p) => p.kind === 'city')
+    const name = window.prompt('Name this world', city ? `Isle of ${city.name}` : `World ${shown.seed}`)?.trim()
+    if (!name) return
+    this.saveButton.disabled = true
+    this.info.textContent = 'saving…'
+    try {
+      const bytes = await encodeSnapshot(shown.world, GENERATOR_VERSION)
+      const saved = await this.bridge.saveWorld(name.slice(0, 80), shown.seed, GENERATOR_VERSION, bytes)
+      this.shown = { kind: 'saved', saved, world: shown.world }
+      this.info.textContent = `saved (${(bytes.length / 1e6).toFixed(1)} MB)${saved.active ? ' · this is the world you walk in' : ''}`
+      await this.refreshList()
+    } catch (err) {
+      this.info.textContent = `Could not save: ${err instanceof Error ? err.message : String(err)}`
+    } finally {
+      this.saveButton.disabled = false
+    }
   }
 
   private draw(world: Continent): void {
@@ -223,4 +383,10 @@ export class WorldMapPage {
 
 function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, (ch) => `&#${ch.charCodeAt(0)};`)
+}
+
+function summary(world: Continent): string {
+  const s = world.stats
+  return `land ${s.land_pct}% · ${s.rivers} rivers · ${s.lakes} lakes · ${s.waterfalls} waterfalls · ` +
+    `${world.places.length} places · ${world.provinces.length} provinces · ${s.roads} roads`
 }

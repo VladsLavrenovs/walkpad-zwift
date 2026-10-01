@@ -6,7 +6,7 @@ import { type Plugin, defineConfig, loadEnv } from 'vite'
 // In dev, the bridge API and WebSocket are proxied through the Vite server, so the page is
 // same-origin with them: no CORS, and belt control works (the bridge sees a local client).
 // Target: BRIDGE_DEV_URL in web/.env (default http://localhost:8080, i.e. `serve --fake`).
-const BRIDGE_PATHS = ['/status', '/sessions', '/stats', '/control', '/videos', '/routes', '/tiles3d', '/live']
+const BRIDGE_PATHS = ['/status', '/sessions', '/stats', '/control', '/videos', '/routes', '/tiles3d', '/worlds', '/live']
 
 // CesiumJS needs its static assets (web workers, images, widget CSS) at CESIUM_BASE_URL.
 // Dev: served straight from node_modules. Build: copied to dist/cesium (about 8 MB).

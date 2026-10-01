@@ -55,8 +55,10 @@ CREATE TABLE IF NOT EXISTS videos (
 CREATE TABLE IF NOT EXISTS routes (
     id             INTEGER PRIMARY KEY,
     name           TEXT NOT NULL,
-    source         TEXT NOT NULL,          -- gpx | ors
-    points         TEXT NOT NULL,          -- JSON [[lat, lon], ...]
+    source         TEXT NOT NULL,          -- gpx | ors | trail
+    seed           INTEGER,                -- trails: the fantasy world's seed (v5)
+    start_biome    TEXT,                   -- trails: the biome they start in, NULL = forest (v6)
+    points         TEXT NOT NULL,          -- JSON [[lat, lon], ...]; [] for trails
     distance_m     REAL NOT NULL,
     progress_m     REAL NOT NULL DEFAULT 0,
     active         INTEGER NOT NULL DEFAULT 0, -- at most one route is active
@@ -75,8 +77,14 @@ CREATE TABLE IF NOT EXISTS tiles3d_sessions (
 );
 CREATE INDEX IF NOT EXISTS tiles3d_sessions_month ON tiles3d_sessions (month, day);
 """
-# v1 -> v4 only add tables, which CREATE ... IF NOT EXISTS does on open.
-SCHEMA_VERSION = 4
+# v1 -> v4 only add tables, which CREATE ... IF NOT EXISTS does on open; v5 and v6 add columns
+# (MIGRATIONS below).
+SCHEMA_VERSION = 6
+# (version, column, ALTER statement): applied when an older database lacks the column.
+MIGRATIONS = [
+    (5, ("routes", "seed"), "ALTER TABLE routes ADD COLUMN seed INTEGER"),
+    (6, ("routes", "start_biome"), "ALTER TABLE routes ADD COLUMN start_biome TEXT"),
+]
 DEFAULT_PACE_KMH = 4.5
 VIDEO_FIELDS = ("title", "pace_kmh", "position_s")
 
@@ -104,6 +112,10 @@ class Store:
         if version > SCHEMA_VERSION:
             raise RuntimeError(f"database schema v{version} is newer than this bridge (v{SCHEMA_VERSION})")
         self.db.executescript(SCHEMA)
+        for _version, (table, column), statement in MIGRATIONS:
+            columns = {row[1] for row in self.db.execute(f"PRAGMA table_info({table})")}
+            if column not in columns:
+                self.db.execute(statement)
         self.db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
     def close(self) -> None:
@@ -236,10 +248,11 @@ class Store:
     # --- routes -------------------------------------------------------------------------------
 
     def add_route(self, name: str, source: str, points: list[tuple[float, float]], distance_m: float,
-                  now: float) -> dict[str, Any]:
+                  now: float, seed: int | None = None, start_biome: str | None = None) -> dict[str, Any]:
         cur = self.db.execute(
-            "INSERT INTO routes (name, source, points, distance_m, created_at) VALUES (?, ?, ?, ?, ?)",
-            (name, source, json.dumps(points, separators=(",", ":")), distance_m, now),
+            "INSERT INTO routes (name, source, points, distance_m, created_at, seed, start_biome)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (name, source, json.dumps(points, separators=(",", ":")), distance_m, now, seed, start_biome),
         )
         assert cur.lastrowid is not None
         route = self.get_route(cur.lastrowid, with_points=False)
@@ -272,12 +285,18 @@ class Store:
                 self.db.execute("UPDATE routes SET active = 1 WHERE id = ?", (id,))
         return True
 
-    def update_route(self, id: int, name: str | None, progress_m: float | None) -> dict[str, Any] | None:
+    def update_route(self, id: int, name: str | None, progress_m: float | None, seed: int | None = None,
+                     start_biome: str | None = None) -> dict[str, Any] | None:
+        """Change a route's name, progress, or its fantasy-world look (seed, starting biome)."""
         route = self.get_route(id, with_points=False)
         if route is None:
             return None
         if name is not None:
             self.db.execute("UPDATE routes SET name = ? WHERE id = ?", (name, id))
+        if seed is not None:
+            self.db.execute("UPDATE routes SET seed = ? WHERE id = ?", (seed, id))
+        if start_biome is not None:
+            self.db.execute("UPDATE routes SET start_biome = ? WHERE id = ?", (start_biome, id))
         if progress_m is not None:
             progress = min(max(0.0, progress_m), route["distance_m"])
             completed = route["completed_at"] if progress >= route["distance_m"] else None
@@ -333,7 +352,7 @@ class Store:
         return [_session(r) for r in rows]
 
 
-ROUTE_SUMMARY = ("id, name, source, distance_m, progress_m, active, created_at, last_walked_at,"
+ROUTE_SUMMARY = ("id, name, source, seed, start_biome, distance_m, progress_m, active, created_at, last_walked_at,"
                  " completed_at")
 
 

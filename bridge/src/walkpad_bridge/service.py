@@ -58,7 +58,8 @@ async def wait_until_moving(backend: PadBackend, timeout_s: float = START_CONFIR
 def route_summary(route: dict[str, Any] | None) -> dict[str, Any] | None:
     if route is None:
         return None
-    return {k: route[k] for k in ("id", "name", "distance_m", "progress_m", "completed_at")}
+    keys = ("id", "name", "source", "seed", "start_biome", "distance_m", "progress_m", "completed_at")
+    return {k: route.get(k) for k in keys}
 
 
 def sample_message(

@@ -235,3 +235,68 @@ async def test_walking_advances_the_active_route_across_sessions(tmp_path: Path,
     done = store.active_route()
     assert done["progress_m"] == pytest.approx(222.4) and done["completed_at"] is not None
     await service.close()
+
+
+def test_trails(client: TestClient) -> None:
+    body = {"name": "Whisperwood Way", "length_m": 5000, "seed": 42}
+    r = client.post("/routes/trail", json=body, headers=H)
+    assert r.status_code == 201
+    trail = r.json()
+    got = (trail["source"], trail["seed"], trail["distance_m"], trail["progress_m"])
+    assert got == ("trail", 42, 5000, 0)
+    random_seed = client.post("/routes/trail", json={"name": "Somewhere", "length_m": 1200}, headers=H).json()
+    assert isinstance(random_seed["seed"], int)
+    assert client.get(f"/routes/{trail['id']}").json()["points"] == []
+    assert client.post("/routes/trail", json={"name": "x", "length_m": 5}, headers=H).status_code == 422
+    assert client.put("/routes/active", json={"id": trail["id"]}, headers=H).status_code == 200
+    route = client.get("/status").json()["route"]
+    assert (route["source"], route["seed"], route["distance_m"]) == ("trail", 42, 5000)
+    tunnel = {**H, "Cf-Connecting-Ip": "8.8.8.8"}
+    r = client.post("/routes/trail", json={"name": "x", "length_m": 500}, headers=tunnel)
+    assert r.status_code == 403
+
+
+def test_trail_start_biome_and_regenerate(client: TestClient) -> None:
+    body = {"name": "Castle Road", "length_m": 8000, "seed": 5, "start_biome": "castle"}
+    trail = client.post("/routes/trail", json=body, headers=H).json()
+    assert (trail["seed"], trail["start_biome"]) == (5, "castle")
+    plain = client.post("/routes/trail", json={"name": "Plain", "length_m": 800}, headers=H).json()
+    assert plain["start_biome"] is None  # the forest, as before
+    bad = {"name": "x", "length_m": 800, "start_biome": "city"}
+    assert client.post("/routes/trail", json=bad, headers=H).status_code == 422
+    # Regenerate: a new seed and starting biome; name and progress stay.
+    client.patch(f"/routes/{trail['id']}", json={"progress_m": 1200}, headers=H)
+    client.put("/routes/active", json={"id": trail["id"]}, headers=H)
+    r = client.patch(f"/routes/{trail['id']}", json={"seed": 99, "start_biome": "falls"}, headers=H)
+    assert r.status_code == 200
+    got = r.json()
+    assert (got["seed"], got["start_biome"], got["name"], got["progress_m"]) == (99, "falls", "Castle Road", 1200)
+    route = client.get("/status").json()["route"]
+    assert (route["seed"], route["start_biome"]) == (99, "falls")
+    patch = client.patch(f"/routes/{trail['id']}", json={"seed": -1}, headers=H)
+    assert patch.status_code == 422
+    tunnel = {**H, "Cf-Connecting-Ip": "8.8.8.8"}
+    assert client.patch(f"/routes/{trail['id']}", json={"seed": 3}, headers=tunnel).status_code == 403
+
+
+def test_v4_database_gains_the_new_columns(tmp_path: Path) -> None:
+    import sqlite3
+
+    path = tmp_path / "v4.sqlite"
+    db = sqlite3.connect(path)
+    db.executescript(
+        "CREATE TABLE routes (id INTEGER PRIMARY KEY, name TEXT NOT NULL, source TEXT NOT NULL,"
+        " points TEXT NOT NULL, distance_m REAL NOT NULL, progress_m REAL NOT NULL DEFAULT 0,"
+        " active INTEGER NOT NULL DEFAULT 0, created_at REAL NOT NULL, last_walked_at REAL,"
+        " completed_at REAL);"
+        "INSERT INTO routes (name, source, points, distance_m, created_at)"
+        " VALUES ('Old', 'gpx', '[]', 10, 1);"
+        "PRAGMA user_version = 4;"
+    )
+    db.close()
+    store = Store(path)
+    (old,) = store.list_routes()
+    assert old["name"] == "Old" and old["seed"] is None
+    trail = store.add_route("New", "trail", [], 500, now=2, seed=7, start_biome="ruins")
+    assert (trail["seed"], trail["start_biome"]) == (7, "ruins")
+    assert old["start_biome"] is None

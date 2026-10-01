@@ -113,7 +113,8 @@ real pad. Stopping the service (Ctrl+C, SIGTERM) stops the belt and closes the o
 | `POST /routes/gpx?name=...` (body: the GPX file) | localhost/LAN | import track points (else route points), segments joined; 5 MB max |
 | `POST /routes/plan {"waypoints": [[lat, lon], ...]}` | localhost/LAN | walking route from OpenRouteService (2-10 waypoints); not saved |
 | `POST /routes {"name", "points"}` | localhost/LAN | save a (planned) route |
-| `PATCH /routes/{id} {"name"?, "progress_m"?}` | localhost/LAN | rename, or set/reset progress |
+| `POST /routes/trail {"name", "length_m", "seed"?, "start_biome"?}` | localhost/LAN | a fantasy trail: a route with no map, a fixed length, a seed and the biome it starts in (`forest`, `ruins`, `meadow`, `fields`, `village`, `castle`, `falls`; none: forest) |
+| `PATCH /routes/{id} {"name"?, "progress_m"?, "seed"?, "start_biome"?}` | localhost/LAN | rename, set/reset progress, or give a trail a new look (the fantasy world's "New world") |
 | `PUT /routes/active {"id": n or null}` | localhost/LAN | the route walking moves along |
 | `DELETE /routes/{id}` | localhost/LAN | remove |
 
@@ -140,8 +141,9 @@ reports it stopped or the pad connection drops. A connection that comes back wit
 the pad's counters still running resumes the same session instead of starting a second one. Totals come from the pad's counters, carried
 across the resets the pad does while slowing down. At most one sample per second is stored.
 Sessions under `min_session_s` (10 s) are dropped. A crash leaves correct totals; the session is
-closed on the next start. Database: `bridge/data/walkpad.sqlite` (schema v4: older databases gain
-the `videos`, `routes` and `tiles3d_sessions` tables on the next start; sessions are untouched).
+closed on the next start. Database: `bridge/data/walkpad.sqlite` (schema v6: older databases gain
+the `videos`, `routes` and `tiles3d_sessions` tables and the `routes.seed` and `routes.start_biome`
+columns on the next start; sessions are untouched).
 
 **Stats**: local time of the laptop. A streak day needs 60 s of walking; the current streak
 still counts until today is over. Fastest average speed only counts sessions of 5+ minutes.

@@ -23,9 +23,10 @@ import asyncio
 import contextlib
 import logging
 import math
+import secrets
 from collections.abc import AsyncIterator
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from fastapi import Body, Depends, FastAPI, Header, HTTPException, Query, Request, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
@@ -82,9 +83,22 @@ class RouteCreate(BaseModel):
     points: list[LatLon] = Field(min_length=2)
 
 
+# The fantasy world's biomes a trail may start in (the web app's gen.ts; not the city).
+StartBiome = Literal["forest", "ruins", "meadow", "fields", "village", "castle", "falls"]
+
+
+class TrailCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    length_m: float = Field(ge=100, le=1_000_000, allow_inf_nan=False)
+    seed: int | None = Field(default=None, ge=0, le=2**31 - 1)
+    start_biome: StartBiome | None = None
+
+
 class RouteUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=200)
     progress_m: float | None = Field(default=None, ge=0, allow_inf_nan=False)
+    seed: int | None = Field(default=None, ge=0, le=2**31 - 1)
+    start_biome: StartBiome | None = None
 
 
 class ActiveRoute(BaseModel):
@@ -341,10 +355,17 @@ def create_app(service: BridgeService, config: Config) -> FastAPI:
         return service.store.add_route(body.name.strip(), body.source, points, route_length_m(points),
                                        service.wall_clock())
 
+    @app.post("/routes/trail", status_code=201)
+    async def create_trail(body: TrailCreate, _client: str = client_dep) -> dict[str, Any]:
+        """A fantasy-world trail: a name, a fixed length and a seed; no map."""
+        seed = body.seed if body.seed is not None else secrets.randbelow(2**31)
+        return service.store.add_route(body.name.strip(), "trail", [], body.length_m,
+                                       service.wall_clock(), seed=seed, start_biome=body.start_biome)
+
     @app.patch("/routes/{route_id}")
     async def update_route(route_id: int, body: RouteUpdate, _client: str = client_dep) -> dict[str, Any]:
         updated = service.store.update_route(
-            route_id, body.name.strip() if body.name else None, body.progress_m
+            route_id, body.name.strip() if body.name else None, body.progress_m, body.seed, body.start_biome
         )
         if updated is None:
             raise HTTPException(404, "no such route")

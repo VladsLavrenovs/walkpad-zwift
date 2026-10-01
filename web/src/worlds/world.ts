@@ -3,7 +3,7 @@
  * everything else (HUD, walker, controls, stats), which stays the same for every world.
  */
 
-import type { BridgeClient } from '../bridge'
+import type { BridgeClient, RouteSummary } from '../bridge'
 import type { Polyline } from '../routes/geo'
 
 /** What the app offers a world. */
@@ -15,8 +15,10 @@ export interface WorldContext {
   setWalkerVisible(on: boolean): void
   /** true for `?view=obs`: no world UI either. */
   obs: boolean
-  /** The active route's shape, once loaded (null: no active route). */
+  /** The active route's shape, once loaded (null: no active route, or a trail without a map). */
   route(): Polyline | null
+  /** The active route or trail (name, length, seed, progress), or null. */
+  activeRoute(): RouteSummary | null
   /** Give up on this world: the app switches to the default world and shows `message`. */
   fallback(message: string): void
 }

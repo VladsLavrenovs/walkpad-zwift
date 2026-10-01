@@ -31,6 +31,23 @@ possible. Tick them off there.
 - [ ] Optional: set `max_sessions_per_day = 1` in bridge/config.toml (restart the service), load
       the 3D world twice: the second time it falls back with "limit reached — resets tomorrow".
 
+## Fantasy trail world
+
+- [ ] On the PC (real GPU): "Fantasy trail" world at quality high holds a steady 60 fps while
+      walking (debug panel: press `` ` ``); if not, medium/low do.
+- [ ] Create a trail (Routes page, a preset), walk it a few minutes, stop, walk again later:
+      the same scenery at the same place, progress continues.
+- [ ] Biomes change every 1-3 km; rain and the day/night cycle look right; the city at the end.
+- [ ] Walk through a village, farmlands, a castle town (through the gate), the waterfall valley:
+      buildings look right (no gaps between wall pieces, doors and windows in place, roofs on),
+      windmill sails turn, waterfalls flow downwards.
+- [ ] At night (or "real time" after dark): windows and lanterns glow, stars, fireflies; with
+      quality high there is a soft bloom around lights.
+- [ ] "⟳ New world" in the fantasy toolbar: pick a starting biome, Generate: a new path and
+      scenery starting there, the trail's progress unchanged; on a remote (tunnel) viewer the
+      button is disabled.
+- [ ] No visible stutter when new streets appear ahead (debug panel: "build ≤ … ms" stays under ~20).
+
 ## Prompt 8 (Cloudflare: Pages deploy, Tunnel, Access)
 
 - [ ] Through the tunnel (`https://walkpad-bridge.connectedovals.com`), control is refused:

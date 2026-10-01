@@ -46,6 +46,12 @@ export class Minimap {
       const full = await this.bridge.route(route.id)
       if (this.loading !== route.id || !full.points) return
       this.routeId = route.id
+      if (full.points.length < 2) {
+        // A fantasy trail: no map to show.
+        this.line = null
+        this.el.hidden = true
+        return
+      }
       this.line = new Polyline(full.points)
       this.el.hidden = false
       this.draw(full.points)

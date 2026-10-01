@@ -84,6 +84,79 @@ always has the same scenery. Progress is stored by the bridge, so a long route t
 
 New dependency: `leaflet` (the standard small 2D map library; OpenStreetMap tiles, credited).
 
+## Fantasy trail world
+
+A procedurally generated walk in three.js (`src/worlds/fantasy/`), loaded only when chosen (its
+own ~700 KB chunk, plus ~2 MB of models and textures from `public/worlds/fantasy/`).
+
+- **Seeded**: the active trail's seed (or the active route's id; or a per-browser seed for a free
+  walk), so the same trail always looks the same.
+- **Terrain** in 40 m chunks along a gently winding path (sum of slow seeded sine waves, never
+  more than ~35° off course), generated ahead (200-420 m by quality) and disposed 60 m behind.
+  At most one piece of work per frame: a chunk's terrain and plants, or (a frame later) its
+  buildings.
+- **Biomes** in seeded stretches (villages and castle towns ~1 km, the rest 1.5-3 km) that follow
+  sensible neighbours and prefer ones not seen for a while, blended over 250 m:
+  - **Dark forest**: dense pines, oaks, birches, ferns, mushrooms, dim light, green fog.
+  - **Misty elven ruins**: ruined stone houses with ivy, archways over the path, pillars, glowing crystals.
+  - **Lakeside meadows**: lush swaying grass, wildflowers, lakes.
+  - **Farmlands**: a patchwork of wheat, cabbage, lavender, ploughed and pasture fields; fences
+    along the road, hay bales, scarecrows, farmhouses, windmills with turning sails.
+  - **Villages**: half-timbered houses on both sides of a cobbled street (a second row behind),
+    lanterns, market stalls, barrels, wells.
+  - **Castle towns**: a town gate across the road with curtain walls, then a walled castle (corner
+    towers, a gate, a keep) beside the street.
+  - **Waterfall valley**: cliffs either side (layered rock), a river along the path, waterfalls
+    with spray.
+  - The **neon night city** covers the last 15 % (at least 1.5 km) of a trail.
+- **Buildings** are assembled in code from the modular kit pieces (walls, windows, shutters,
+  doors, roofs, gables, chimneys, ivy) and baked per chunk into one mesh per material, with the
+  kit's hand-painted textures and normal maps.
+- **Sky and light**: a sky dome with sun, moon, twinkling stars and drifting clouds; the sky also
+  lights the scene (image-based light, refreshed every 3 s) and reflects in the water. A
+  **day/night cycle** (24 real minutes per day, or "real time" from the toolbar): at night the
+  windows and lanterns glow and fireflies come out (the city is always at night). Per-biome fog,
+  light rain in some 1.5 km zones.
+- **Plants** sway in the wind (a vertex shader on grass, crops, ferns and tree crowns).
+- **Trails**: named, fixed-length (Routes page → "New fantasy trail", or a preset), starting in a
+  chosen or random biome. They are routes without a map, so progress persists across sessions
+  exactly like routes.
+- **New world** (toolbar): regenerate with a new seed, starting in a chosen or random biome. For
+  the active trail this changes its seed and starting biome on the bridge (progress stays; needs
+  local control, read-only viewers see the button disabled); for a free walk it is stored in this
+  browser.
+- Same smooth motion and damped chase camera maths as the other worlds (7 m behind, 3.2 m up,
+  looking 9 m ahead); the walker sprite stays.
+- **Quality** (toolbar, remembered):
+
+  | | pixels | ahead | plants drawn | buildings drawn | density | shadows | bloom |
+  |---|---|---|---|---|---|---|---|
+  | high | 2× | 420 m | 130 m | 270 m | 100 % | 2048 | yes (MSAA ×4) |
+  | medium | 1.25× | 300 m | 85 m | 200 m | 60 % | 1024 | no |
+  | low | 1× | 200 m | 50 m | 140 m | 35 % | no | no |
+
+  Measured in headless Firefox (this laptop): a village street at high is ~260 draw calls and
+  ~1.1 M triangles at 60 fps; a chunk's buildings bake in ≤ 20 ms.
+- **Debug panel**: press `` ` `` (backquote): seed, trail, position, biome mix, next biome, time,
+  rain, fps, draw calls, triangles, chunks and the slowest recent chunk build, quality.
+
+| Module | Role |
+|---|---|
+| `fantasy/biomes.ts` | Biome names and the starting-biome list (small, shared with the Routes page). |
+| `fantasy/gen.ts` | Pure generation: seeded RNG and noise, `TrailPath`, biome plan and blending, terrain heights, field patchwork, rain, time of day, quality presets, prop scatter, buildings (`house()`, `tower()`, `ruin()`, castles) and waterfalls. Unit-tested. |
+| `fantasy/assets.ts` | The kit: loads models and textures, materials, procedural pieces (foundations, battlements, lanterns, windmill, archway), baking a chunk's buildings. |
+| `fantasy/props.ts` | Scattered props: stylised trees, grass, crops, rocks, village props (procedural), kit models. |
+| `fantasy/shaders.ts` | Wind sway, sky dome, textured ground (noise, cobbles, cliff rock), waterfalls, glowing particles. |
+| `fantasy/world.ts` | three.js scene, chunk streaming, lights, fog, rain, bloom, camera, toolbar, debug panel. |
+
+Assets: Quaternius Medieval Village MegaKit (CC0), credits in
+[docs/art/CREDITS.md](../docs/art/CREDITS.md). To re-import (e.g. after changing the list of
+models): `python3 web/tools/import_quaternius.py "<path to the kit zip>"` (needs Pillow for the
+texture downscaling).
+
+New dependency: `three` (three.js, the standard WebGL library; named in the brief). Post-processing
+(bloom) uses three's own addons, nothing new.
+
 ## Real world (3D) world
 
 Google Photorealistic 3D Tiles in CesiumJS, following the active route. Off unless

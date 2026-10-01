@@ -138,6 +138,7 @@ export class App {
       },
       obs: this.config.obs,
       route: () => this.minimap.line,
+      activeRoute: () => this.status?.route ?? null,
       fallback: (message) => {
         if (this.world !== world) return
         this.toast(message, 8000)

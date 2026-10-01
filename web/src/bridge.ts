@@ -21,13 +21,18 @@ export interface SampleMsg {
 export interface RouteSummary {
   id: number
   name: string
+  source?: 'gpx' | 'ors' | 'trail'
+  /** Trails: the fantasy world's seed. */
+  seed?: number | null
+  /** Trails: the biome the fantasy world starts in (null: the forest). */
+  start_biome?: string | null
   distance_m: number
   progress_m: number
   completed_at: number | null
 }
 
 export interface Route extends RouteSummary {
-  source: 'gpx' | 'ors'
+  source: 'gpx' | 'ors' | 'trail'
   active: boolean
   created_at: number
   last_walked_at: number | null
@@ -335,11 +340,18 @@ export class BridgeClient {
     return this.write('POST', '/routes/plan', { waypoints })
   }
 
+  createTrail(name: string, lengthM: number, seed?: number, startBiome?: string): Promise<Route> {
+    return this.write('POST', '/routes/trail', {
+      name, length_m: lengthM, ...(seed === undefined ? {} : { seed }), ...(startBiome ? { start_biome: startBiome } : {}),
+    })
+  }
+
   saveRoute(name: string, points: [number, number][]): Promise<Route> {
     return this.write('POST', '/routes', { name, points, source: 'ors' })
   }
 
-  updateRoute(id: number, fields: { name?: string; progress_m?: number }): Promise<Route> {
+  /** Rename, set progress, or give a trail a new look (seed, starting biome). */
+  updateRoute(id: number, fields: { name?: string; progress_m?: number; seed?: number; start_biome?: string }): Promise<Route> {
     return this.write('PATCH', `/routes/${id}`, fields)
   }
 

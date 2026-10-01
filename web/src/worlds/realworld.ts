@@ -51,7 +51,7 @@ export class RealWorld implements World {
       this.showNote('No Google Maps key: set VITE_GOOGLE_MAPS_API_KEY in web/.env and rebuild.')
       return
     }
-    this.showNote('Waiting for the active route (choose one on the Routes page).')
+    this.showNote('Waiting for an active map route (choose one on the Routes page; fantasy trails have no map).')
   }
 
   update(distanceM: number, _speedKmh: number, dt: number): void {

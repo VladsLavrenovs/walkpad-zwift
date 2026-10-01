@@ -2,6 +2,7 @@
 
 import type { BridgeClient, Route } from '../bridge'
 import { fmtDistance } from '../format'
+import { BIOME_NAMES, START_BIOMES, type StartBiome, isStartBiome, randomStartBiome } from '../worlds/fantasy/biomes'
 import { DONE_COLOR, L, ROUTE_COLOR, osmMap } from './map'
 
 export class RoutesPage {
@@ -34,6 +35,19 @@ export class RoutesPage {
       <p class="muted">The active route moves as you walk, across sessions, until you reach its end.</p>
       <div class="route-list"><p class="muted">Loading…</p></div>
       <div class="route-tools" ${editable ? '' : 'hidden'}>
+        <h2>New fantasy trail</h2>
+        <p class="muted">A named trail of fixed length for the “Fantasy trail” world: forests, elven
+          ruins, meadows, farmlands, villages, castle towns, a waterfall valley, and a neon city at
+          the end. The same trail always looks the same; “New world” in the fantasy world gives it a
+          new look.</p>
+        <div class="trail-presets"></div>
+        <form class="trail-form">
+          <input type="text" name="name" placeholder="Trail name" maxlength="200" required>
+          <label>length <input type="number" name="km" min="0.5" max="1000" step="0.5" value="10" required> km</label>
+          <label>start in <select name="start"><option value="">random</option>${START_BIOMES.map((b) => `<option value="${b}">${BIOME_NAMES[b]}</option>`).join('')}</select></label>
+          <input type="number" name="seed" placeholder="Seed (optional)" min="0" step="1">
+          <button type="submit">Create</button>
+        </form>
         <h2>Import a GPX file</h2>
         <form class="gpx-form">
           <input type="file" name="file" accept=".gpx,application/gpx+xml" required>
@@ -90,7 +104,7 @@ export class RoutesPage {
         card.className = `route-card${r.active ? ' active' : ''}`
         card.innerHTML = `
           <div class="route-head">
-            <b></b><span class="muted">${r.source === 'gpx' ? 'GPX' : 'planned'}</span>
+            <b></b><span class="muted">${r.source === 'gpx' ? 'GPX' : r.source === 'trail' ? `fantasy trail · starts in ${BIOME_NAMES[isStartBiome(r.start_biome) ? r.start_biome : 'forest'].toLowerCase()}` : 'planned'}</span>
             ${r.active ? '<span class="tag">walking this</span>' : ''}
             ${r.completed_at ? '<span class="tag done">done</span>' : ''}
           </div>
@@ -135,6 +149,29 @@ export class RoutesPage {
   }
 
   private setUpTools(): void {
+    const presets: [string, number, StartBiome | undefined][] = [
+      ['Whisperwood Way', 5, 'forest'], ['Elven Ruins Circuit', 12, 'ruins'], ['Lakeshore Ramble', 21, 'meadow'],
+      ['Harvest Lanes', 8, 'fields'], ['Castle Road', 15, 'castle'], ['Valley of Falls', 10, 'falls'],
+      ['Road to Neon City', 42, undefined],
+    ]
+    const presetBox = this.el.querySelector('.trail-presets')!
+    presetBox.replaceChildren(...presets.map(([name, km, start]) => {
+      const b = document.createElement('button')
+      b.type = 'button'
+      b.textContent = `${name} · ${km} km`
+      b.onclick = () => void this.addTrail(name, km * 1000, undefined, start)
+      return b
+    }))
+    const trailForm = this.el.querySelector<HTMLFormElement>('.trail-form')!
+    trailForm.onsubmit = (e) => {
+      e.preventDefault()
+      const data = new FormData(trailForm)
+      const seed = String(data.get('seed') ?? '').trim()
+      const start = String(data.get('start') ?? '')
+      void this.addTrail(String(data.get('name')), Number(data.get('km')) * 1000, seed === '' ? undefined : Number(seed),
+        isStartBiome(start) ? start : undefined)
+        .then(() => trailForm.reset())
+    }
     const gpx = this.el.querySelector<HTMLFormElement>('.gpx-form')!
     gpx.onsubmit = async (e) => {
       e.preventDefault()
@@ -189,6 +226,16 @@ export class RoutesPage {
       const full = await this.bridge.route(recent.id)
       if (full.points?.length) map.fitBounds(L.latLngBounds(full.points), { padding: [20, 20] })
     }).catch(() => {})
+  }
+
+  /** A new trail; without a starting biome it starts in a random one. */
+  private async addTrail(name: string, lengthM: number, seed?: number, start?: StartBiome): Promise<void> {
+    try {
+      await this.bridge.createTrail(name.trim(), lengthM, seed, start ?? randomStartBiome())
+      await this.reload()
+    } catch (err) {
+      this.error(`Could not create the trail: ${err instanceof Error ? err.message : String(err)}`)
+    }
   }
 
   private renderPlan(): void {

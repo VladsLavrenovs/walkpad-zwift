@@ -68,6 +68,8 @@ export class WorldMapPage {
   private generating = 0
   private shown: Shown | null = null
   private saved: SavedWorld[] = []
+  /** Places discovered in the saved world on show. */
+  private found = new Set<string>()
 
   constructor(parent: HTMLElement, bridge: BridgeClient, canEdit: () => boolean) {
     this.bridge = bridge
@@ -171,6 +173,7 @@ export class WorldMapPage {
       const world = e.data
       this.info.textContent = `${Math.round(performance.now() - t0)} ms · ${summary(world)}`
       this.shown = { kind: 'preview', seed, world }
+      this.found = new Set()
       this.renderTitle()
       this.draw(world)
       this.worker?.terminate()
@@ -184,8 +187,12 @@ export class WorldMapPage {
     this.worker?.terminate()
     this.info.textContent = `loading ${saved.name}…`
     try {
-      const { continent } = await decodeSnapshot(await this.bridge.worldSnapshot(saved.id))
+      const [{ continent }, found] = await Promise.all([
+        decodeSnapshot(await this.bridge.worldSnapshot(saved.id)),
+        this.bridge.discoveries(saved.id).catch(() => []),
+      ])
       if (job !== this.generating) return
+      this.found = new Set(found.filter((d) => d.kind === 'place').map((d) => d.key))
       this.shown = { kind: 'saved', saved, world: continent }
       this.seedInput.value = String(saved.seed)
       this.info.textContent = summary(continent)
@@ -347,11 +354,12 @@ export class WorldMapPage {
   }
 
   private placeMarker(p: Place): L.Marker {
+    const found = this.found.has(p.id)
     return L.marker(L.latLng(p.z, p.x), {
-      title: `${p.name} (${p.kind})`,
+      title: `${p.name} (${p.kind})${found ? ' · discovered' : ''}`,
       icon: L.divIcon({
-        className: `wm-place wm-${p.kind}`,
-        html: `<i>${SYMBOL[p.kind]}</i><span>${escapeHtml(p.name)}</span>`,
+        className: `wm-place wm-${p.kind}${found ? ' wm-found' : ''}`,
+        html: `<i>${SYMBOL[p.kind]}</i><span>${escapeHtml(p.name)}${found ? ' ✓' : ''}</span>`,
         iconSize: [0, 0],
       }),
     })

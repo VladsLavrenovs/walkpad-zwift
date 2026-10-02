@@ -25,10 +25,12 @@ from typing import Any
 
 from .backend import BackendError, BeltState, PadBackend, Sample
 from .clock import Clock, MonotonicClock
+from . import progression
 from .config import Config
 from .recorder import SessionRecorder
 from .routes import RouteProgress
 from .safety import SafetyError, SafetyEvent, SpeedController
+from .stats import compute_stats
 from .storage import Store
 from .udp import UdpSender
 
@@ -234,6 +236,21 @@ class BridgeService:
             if queue.full():
                 queue.get_nowait()  # a slow client loses old samples, never blocks the bridge
             queue.put_nowait(message)
+
+    def game_profile(self) -> dict[str, Any]:
+        """The walker's XP, level and achievements; unlocks any achievement just reached."""
+        stats = compute_stats(self.store.finished_sessions(), now=self.wall_clock())
+        live_m = self.recorder.totals.distance_m if self.recorder.session_id is not None else 0.0
+        found = self.store.discoveries()
+        values = progression.metrics(stats, live_m, found)
+        unlocked = self.store.unlocked_achievements()
+        new = progression.newly_unlocked(values, unlocked)
+        if new:
+            now = self.wall_clock()
+            self.store.unlock_achievements([a.id for a in new], now)
+            unlocked.update({a.id: now for a in new})
+            log.info("achievements unlocked: %s", ", ".join(a.title for a in new))
+        return progression.profile(values, found, unlocked)
 
     def status(self) -> dict[str, Any]:
         c = self.controller

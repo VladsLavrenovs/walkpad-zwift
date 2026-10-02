@@ -49,6 +49,39 @@ export interface SavedWorld {
   played_at: number | null
 }
 
+/** One achievement and how far along it is. */
+export interface Achievement {
+  id: string
+  title: string
+  description: string
+  xp: number
+  metric: string
+  target: number
+  progress: number
+  unlocked_at: number | null
+}
+
+/** The walker (one character across all worlds). */
+export interface GameProfile {
+  xp: number
+  level: number
+  level_start_xp: number
+  next_level_xp: number
+  breakdown: { walking: number; discoveries: number; achievements: number }
+  metrics: Record<string, number>
+  achievements: Achievement[]
+}
+
+export type DiscoveryKind = 'place' | 'province' | 'biome'
+
+export interface Discovery {
+  world_id: number
+  kind: DiscoveryKind
+  key: string
+  xp: number
+  found_at: number
+}
+
 export interface Route extends RouteSummary {
   source: 'gpx' | 'ors' | 'trail'
   active: boolean
@@ -395,6 +428,19 @@ export class BridgeClient {
 
   deleteWorld(id: number): Promise<void> {
     return this.write('DELETE', `/worlds/${id}`)
+  }
+
+  gameProfile(): Promise<GameProfile> {
+    return this.get('/game/profile')
+  }
+
+  async discoveries(worldId: number): Promise<Discovery[]> {
+    return (await this.get<{ discoveries: Discovery[] }>(`/worlds/${worldId}/discoveries`)).discoveries
+  }
+
+  /** First visits in a world; the bridge gives XP for the new ones. */
+  addDiscoveries(worldId: number, items: { kind: DiscoveryKind; key: string }[]): Promise<{ new: Discovery[]; profile: GameProfile }> {
+    return this.write('POST', `/worlds/${worldId}/discoveries`, { items })
   }
 
   setWorldState(id: number, state: { x: number; z: number; heading: number; walked_m: number }, keepalive = false): Promise<SavedWorld> {

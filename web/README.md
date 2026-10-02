@@ -259,6 +259,23 @@ position the bridge has.
   a new province, a north-up minimap. Quality, time of day and a debug panel (`` ` ``) as in the
   fantasy world.
 
+**Progression** (one character across all worlds; the bridge keeps the numbers):
+
+- **XP:** walking, 1 XP per 10 m (every walk, any world, including the one going on);
+  **discoveries** in the open world, first time per world: cities and castles 100, ruins and
+  waterfalls 75, villages 50, windmills 25, a new province 150, a new kind of land 100;
+  **achievements** (26: distance, walks in one go, streaks, number of walks, places, castles,
+  waterfalls, provinces, all five kinds of land...), each worth XP once unlocked.
+- **Levels:** level L needs 50 x L x (L - 1) XP in total (100 for level 2, 300 for 3, 4500
+  for 10).
+- **In the open world:** an XP bar under the compass, toasts for discoveries, level-ups and
+  achievements. A place counts when you get close (a city 130 m, a village 80 m, a windmill
+  40 m); a province when you enter it; a kind of land when it is over 60 % of what is around you.
+- **Profile** (top bar, `#/profile`): level, where the XP came from, all achievements with
+  progress. On the world map, discovered places get a ✓.
+- XP and achievements stay when a world is deleted. View-only pages show them but never
+  discover anything.
+
 | Module | Role |
 |---|---|
 | `openworld/continent/terrain.ts` | Land shape and relief |
@@ -272,6 +289,8 @@ position the bridge has.
 | `openworld/mapdraw.ts`, `mappage.ts` | The world map page |
 | `openworld/ground.ts` | Ground height, water, roads at metre scale (shared by everything) |
 | `openworld/towns.ts`, `flora.ts` | Buildings and plants, deterministic |
+| `openworld/progress.ts` | Discoveries, XP bar and toasts in the open world; unit-tested |
+| `profile.ts` | The Profile page |
 | `openworld/movement.ts` | Walking and steering (keys never overlap the belt keys) |
 | `openworld/scene.ts`, `world.ts` | The 3D world: renderer and atmosphere; tiles, water, camera, HUD, saving |
 | `openworld/openworld.test.ts` | Ground, towns, plants, walking, and "no belt calls" |

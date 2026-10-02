@@ -31,6 +31,7 @@ import { fieldAt, plantTile } from './flora'
 import { Ground, riverHalfWidth } from './ground'
 import { colorAt } from './mapdraw'
 import { STEER_KEYS, TURN_RATE, step } from './movement'
+import { Progress } from './progress'
 import { Scene3d } from './scene'
 import { type Building, type Footprint, type TownProp, insideFoot, layoutTowns } from './towns'
 
@@ -133,6 +134,7 @@ export class OpenWorld implements World {
   private compass!: HTMLDivElement
   private where!: HTMLDivElement
   private banner!: HTMLDivElement
+  private progress!: Progress
   private minimap!: HTMLCanvasElement
   private mapImage: HTMLCanvasElement | null = null
   private miniAt = 0
@@ -169,6 +171,7 @@ export class OpenWorld implements World {
     this.debugEl = this.root.querySelector('.fantasy-debug')!
     this.note = this.root.querySelector('.ow-note')!
     this.buildCompass()
+    this.progress = new Progress(this.root, ctx.bridge, () => ctx.canEdit())
     container.append(this.root)
 
     this.s3 = new Scene3d(this.root, this.quality)
@@ -281,6 +284,7 @@ export class OpenWorld implements World {
     this.province = -1
     this.showNote(null)
     this.renderMapImage()
+    void this.progress.start(saved.id)
   }
 
   /** The whole island, low detail, a little below the tiles (they cover it near you). */
@@ -395,6 +399,7 @@ export class OpenWorld implements World {
     this.placeWalker(gy)
 
     const w = g.biomes(p.x, p.z)
+    this.progress.tick(dt, this.c, p.x, p.z, w)
     const night = this.s3.atmosphere(hour, w, { x: p.x, y: gy, z: p.z }, dt, this.kitReady ? this.kit : null)
     this.fallMat.uniforms.uLight.value = 0.25 + (1 - night) * 0.85
     this.sprayMat.uniforms.uAlpha.value = 0.18 + (1 - night) * 0.25

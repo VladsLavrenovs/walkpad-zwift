@@ -11,7 +11,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from test_server import H, make_client
-from walkpad_bridge.storage import Store
+from walkpad_bridge.storage import SCHEMA_VERSION, Store
 
 SNAPSHOT = gzip.compress(b"WPW1" + bytes(range(256)) * 40)
 TUNNEL = {**H, "Cf-Connecting-Ip": "8.8.8.8"}
@@ -99,7 +99,7 @@ def test_v6_database_gains_the_worlds_table(tmp_path: Path) -> None:
     db.executescript("CREATE TABLE videos (id INTEGER PRIMARY KEY, video_id TEXT); PRAGMA user_version = 6;")
     db.close()
     store = Store(path)
-    assert store.db.execute("PRAGMA user_version").fetchone()[0] == 7
+    assert store.db.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
     world = store.add_world("W", 1, 1, SNAPSHOT, now=5)
     assert store.world_snapshot(world["id"]) == SNAPSHOT
     assert store.list_worlds()[0]["active"] is True

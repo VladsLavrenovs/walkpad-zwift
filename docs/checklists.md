@@ -80,6 +80,14 @@ possible. Tick them off there.
 - [ ] Compass, place names, the province banner and the minimap look right; 60 fps on the PC
       at high.
 
+## Open world: progression
+
+- [ ] Walking into a village, castle or new province in the Open world shows a toast with XP;
+      the XP bar under the compass fills; a level-up shows "Level N!".
+- [ ] Profile (top bar): level, XP from walking / discoveries / achievements, achievements with
+      progress; unlocked ones with their date.
+- [ ] Walks in other worlds also add walking XP. On the world map, discovered places have a ✓.
+
 ## Prompt 8 (Cloudflare: Workers deploy, Tunnel, Access) — setup: [cloudflare.md](cloudflare.md)
 
 - [ ] `walkpad-tunnel` service active and the tunnel **Healthy** in the dashboard; it comes back

@@ -124,6 +124,9 @@ real pad. Stopping the service (Ctrl+C, SIGTERM) stops the belt and closes the o
 | `PUT /worlds/active {"id": n or null}` | localhost/LAN | the world the Open world walks in |
 | `PUT /worlds/{id}/state {"x", "z", "heading", "walked_m"}` | localhost/LAN | where the player is (walked metres never go back) |
 | `DELETE /worlds/{id}` | localhost/LAN | remove |
+| `GET /game/profile` | anyone | the walker's XP, level, XP breakdown, metrics and achievements (unlocks any just reached) |
+| `GET /worlds/{id}/discoveries` | anyone | places, provinces and kinds of land found in that world |
+| `POST /worlds/{id}/discoveries {"items": [{"kind", "key"}]}` | localhost/LAN | first visits (`place`: "castle-3", `province`: "2", `biome`: "forest"); XP for the new ones; returns them and the profile |
 
 Invalid input is a 422 with `{"detail": [{"loc", "msg", "type"}]}` (the offending value is not
 echoed, so a NaN or Infinity in a body cannot break the error response).
@@ -158,8 +161,8 @@ reports it stopped or the pad connection drops. A connection that comes back wit
 the pad's counters still running resumes the same session instead of starting a second one. Totals come from the pad's counters, carried
 across the resets the pad does while slowing down. At most one sample per second is stored.
 Sessions under `min_session_s` (10 s) are dropped. A crash leaves correct totals; the session is
-closed on the next start. Database: `bridge/data/walkpad.sqlite` (schema v7: older databases gain
-the `videos`, `routes`, `tiles3d_sessions` and `worlds` tables and the `routes.seed` and `routes.start_biome`
+closed on the next start. Database: `bridge/data/walkpad.sqlite` (schema v8: older databases gain
+the `videos`, `routes`, `tiles3d_sessions`, `worlds`, `discoveries` and `achievements` tables and the `routes.seed` and `routes.start_biome`
 columns on the next start; sessions are untouched).
 
 **Stats**: local time of the laptop. A streak day needs 60 s of walking; the current streak
@@ -211,6 +214,7 @@ On Windows (dev only) the signals are Ctrl+C and Ctrl+Break; SIGTERM there is an
 | `recorder.py` | `SessionRecorder`: samples in, sessions out; start/end with the belt, counter resets. |
 | `stats.py` | Period totals, streaks, personal bests over finished sessions. |
 | `service.py` | `BridgeService`: pad connection loop, controller, recorder, WebSocket/UDP fan-out, client grace period. |
+| `progression.py` | Open-world XP, levels and the achievement list (data). |
 | `access.py` | Who may control: localhost/LAN, tunnel detection, Host check; which browser origins may connect at all. |
 | `server.py` | FastAPI app: endpoints above, CORS, the web app. |
 | `udp.py` | `UdpSender`: JSON datagrams. |

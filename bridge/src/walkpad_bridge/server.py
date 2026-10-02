@@ -37,6 +37,7 @@ from starlette.types import Receive, Scope, Send
 from pydantic import BaseModel, Field
 from starlette.websockets import WebSocketDisconnect
 
+from . import progression
 from .access import control_refusal, is_local_client, origin_allowed
 from .backend import BackendError
 from .config import Config
@@ -101,6 +102,15 @@ class RouteUpdate(BaseModel):
     progress_m: float | None = Field(default=None, ge=0, allow_inf_nan=False)
     seed: int | None = Field(default=None, ge=0, le=2**31 - 1)
     start_biome: StartBiome | None = None
+
+
+class Discovery(BaseModel):
+    kind: Literal["place", "province", "biome"]
+    key: str = Field(min_length=1, max_length=40)
+
+
+class Discoveries(BaseModel):
+    items: list[Discovery] = Field(min_length=1, max_length=50)
 
 
 class WorldRename(BaseModel):
@@ -457,6 +467,30 @@ def create_app(service: BridgeService, config: Config) -> FastAPI:
         if world is None:
             raise HTTPException(404, "no such world")
         return world
+
+    # --- open world: progression (anyone may read; discoveries are local-only) ------------------
+
+    @app.get("/game/profile")
+    async def game_profile() -> dict[str, Any]:
+        return service.game_profile()
+
+    @app.get("/worlds/{world_id}/discoveries")
+    async def world_discoveries(world_id: int) -> dict[str, Any]:
+        return {"discoveries": service.store.discoveries(world_id)}
+
+    @app.post("/worlds/{world_id}/discoveries")
+    async def add_discoveries(world_id: int, body: Discoveries, _client: str = client_dep) -> dict[str, Any]:
+        """Places, provinces and biomes reached for the first time in a world: XP for each new one."""
+        if service.store.get_world(world_id) is None:
+            raise HTTPException(404, "no such world")
+        items = []
+        for d in body.items:
+            xp = progression.discovery_xp(d.kind, d.key)
+            if xp is None:
+                raise HTTPException(422, f"not a discovery: {d.kind} {d.key}")
+            items.append((d.kind, d.key, xp))
+        new = service.store.add_discoveries(world_id, items, service.wall_clock())
+        return {"new": new, "profile": service.game_profile()}
 
     @app.delete("/worlds/{world_id}", status_code=204)
     async def delete_world(world_id: int, _client: str = client_dep) -> None:

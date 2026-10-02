@@ -84,6 +84,21 @@ CREATE TABLE IF NOT EXISTS worlds (
     played_at   REAL
 );
 
+-- v8: open-world progression. Discoveries keep their XP even when their world is deleted (the
+-- walker's progress is not lost with a world); unlocked achievements are never taken back.
+CREATE TABLE IF NOT EXISTS discoveries (
+    world_id INTEGER NOT NULL,
+    kind     TEXT NOT NULL,                -- place | province | biome
+    key      TEXT NOT NULL,                -- place id ("castle-3"), province index, biome name
+    xp       INTEGER NOT NULL,
+    found_at REAL NOT NULL,
+    PRIMARY KEY (world_id, kind, key)
+);
+CREATE TABLE IF NOT EXISTS achievements (
+    id          TEXT PRIMARY KEY,
+    unlocked_at REAL NOT NULL
+);
+
 -- v4: granted Google 3D tiles sessions, for the cost guard (tiles3d.py).
 CREATE TABLE IF NOT EXISTS tiles3d_sessions (
     id         INTEGER PRIMARY KEY,
@@ -94,9 +109,9 @@ CREATE TABLE IF NOT EXISTS tiles3d_sessions (
 );
 CREATE INDEX IF NOT EXISTS tiles3d_sessions_month ON tiles3d_sessions (month, day);
 """
-# v1 -> v4 and v7 only add tables, which CREATE ... IF NOT EXISTS does on open; v5 and v6 add
-# columns (MIGRATIONS below).
-SCHEMA_VERSION = 7
+# v1 -> v4, v7 and v8 only add tables, which CREATE ... IF NOT EXISTS does on open; v5 and v6
+# add columns (MIGRATIONS below).
+SCHEMA_VERSION = 8
 # (version, column, ALTER statement): applied when an older database lacks the column.
 MIGRATIONS = [
     (5, ("routes", "seed"), "ALTER TABLE routes ADD COLUMN seed INTEGER"),
@@ -419,6 +434,35 @@ class Store:
             (x, z, heading, walked_m, now, id),
         )
         return self.get_world(id)
+
+    # --- open-world progression --------------------------------------------------------------------
+
+    def add_discoveries(self, world_id: int, items: list[tuple[str, str, int]], now: float) -> list[dict[str, Any]]:
+        """Record (kind, key, xp) discoveries in a world; returns the ones that are new."""
+        new = []
+        with self.db:
+            self.db.execute("BEGIN")
+            for kind, key, xp in items:
+                cur = self.db.execute(
+                    "INSERT OR IGNORE INTO discoveries (world_id, kind, key, xp, found_at) VALUES (?, ?, ?, ?, ?)",
+                    (world_id, kind, key, xp, now),
+                )
+                if cur.rowcount:
+                    new.append({"world_id": world_id, "kind": kind, "key": key, "xp": xp, "found_at": now})
+        return new
+
+    def discoveries(self, world_id: int | None = None) -> list[dict[str, Any]]:
+        if world_id is None:
+            rows = self.db.execute("SELECT * FROM discoveries ORDER BY found_at")
+        else:
+            rows = self.db.execute("SELECT * FROM discoveries WHERE world_id = ? ORDER BY found_at", (world_id,))
+        return [dict(r) for r in rows]
+
+    def unlocked_achievements(self) -> dict[str, float]:
+        return {r["id"]: r["unlocked_at"] for r in self.db.execute("SELECT * FROM achievements")}
+
+    def unlock_achievements(self, ids: list[str], now: float) -> None:
+        self.db.executemany("INSERT OR IGNORE INTO achievements (id, unlocked_at) VALUES (?, ?)", [(i, now) for i in ids])
 
     def finished_sessions(self) -> list[dict[str, Any]]:
         rows = self.db.execute("SELECT * FROM sessions WHERE ended_at IS NOT NULL ORDER BY started_at")

@@ -19,6 +19,7 @@ import { Minimap } from './routes/minimap'
 import { RoutesPage } from './routes/page'
 import { RouteTracker } from './routes/progress'
 import { StatsPage } from './stats'
+import { ProfilePage } from './profile'
 import { Walker } from './walker'
 import { WORLDS, findWorld } from './worlds'
 import type { World } from './worlds/world'
@@ -36,6 +37,7 @@ export class App {
   private readonly controls: Controls | null
   private readonly stats: StatsPage | null
   private readonly routesPage: RoutesPage | null
+  private readonly profilePage: ProfilePage | null
   /** #/worldmap: the open world's map, loaded on first visit (its own lazy chunk). */
   private worldMap: { show(): void; hide(): void } | null = null
   private worldMapLoading = false
@@ -78,6 +80,7 @@ export class App {
         <label class="world-menu">World <select></select></label>
         <a class="link" href="#/routes">Routes</a>
         <a class="link" href="#/stats">Stats</a>
+        <a class="link" href="#/profile">Profile</a>
         <a class="link" href="#/worldmap">Map</a>
       </div>
       <div class="banner" role="alert" hidden></div>
@@ -105,6 +108,7 @@ export class App {
     this.walker = new Walker(root)
     this.controls = config.obs ? null : new Controls(root, this.bridge, (m) => this.toast(m))
     this.stats = config.obs ? null : new StatsPage(root, this.bridge)
+    this.profilePage = config.obs ? null : new ProfilePage(root, this.bridge)
     this.minimap = new Minimap(root, this.bridge)
     this.routesPage = config.obs ? null : new RoutesPage(root, this.bridge, () => this.controlAllowed, () => {})
     if (this.controls) this.controls.visible = false
@@ -169,7 +173,10 @@ export class App {
     const onStats = location.hash === '#/stats' && this.stats !== null
     const onRoutes = location.hash === '#/routes' && this.routesPage !== null
     const onWorldMap = location.hash === '#/worldmap' && !this.config.obs
-    this.root.classList.toggle('on-stats', onStats || onRoutes || onWorldMap)
+    const onProfile = location.hash === '#/profile' && this.profilePage !== null
+    this.root.classList.toggle('on-stats', onStats || onRoutes || onWorldMap || onProfile)
+    if (onProfile) void this.profilePage!.show()
+    else this.profilePage?.hide()
     if (onWorldMap) this.showWorldMap()
     else this.worldMap?.hide()
     if (onStats) void this.stats!.show()

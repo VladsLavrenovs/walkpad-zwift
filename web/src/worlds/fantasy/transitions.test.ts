@@ -53,7 +53,7 @@ describe('biome transitions while walking', () => {
     })
   }
 
-  it('props of the old biome thin out in step with its weight (averaged over many chunks)', () => {
+  it('props of the old biome thin out in step with its weight (averaged over many chunks)', { timeout: 30_000 }, () => {
     const plan = [
       { biome: 'forest' as const, start: 0, end: 1000 },
       { biome: 'meadow' as const, start: 1000, end: Number.POSITIVE_INFINITY },

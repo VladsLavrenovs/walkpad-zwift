@@ -159,9 +159,11 @@ own ~700 KB chunk, plus ~2 MB of models and textures from `public/worlds/fantasy
   (up/down); mouse wheel or pinch to zoom (0.35× to 4×); double-click or "⟲ Reset camera" for
   the default view. Remembered in this browser; OBS view always uses the default. The camera
   moves in towards the walker rather than into a building, and more terrain is kept behind when
-  you look back. The walker sprite is placed by projecting her feet and head from the scene, so
-  she stays on the path at the right size; she only has back-view frames, so from the front or
-  the side she still shows her back.
+  you look back. **The walker is true to scale** in both 3D worlds (Fantasy trail and Open
+  world): her feet and head (1.7 m) are projected from the scene every frame and the sprite is
+  stood there at that height, so she is as tall as the people and doorways around her and stays
+  the same size with the same camera. She only has back-view frames, so from the front or the
+  side she still shows her back. (YouTube and the placeholder worlds keep the big overlay.)
 - **Quality** (toolbar, remembered):
 
   | | pixels | ahead | plants drawn | buildings drawn | density | shadows | bloom |

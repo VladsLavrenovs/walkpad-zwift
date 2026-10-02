@@ -42,3 +42,12 @@ describe('Gait', () => {
     expect(bobs[49]).toBeGreaterThan(bobs[5]) // highest mid-step
   })
 })
+
+describe('true-to-scale placement', () => {
+  it('moves her feet onto the scene point and scales her to the projected height', async () => {
+    const { truePlacement } = await import('./walker')
+    const natural = { feetX: 700, feetY: 860, figurePx: 476 }
+    expect(truePlacement(natural, { x: 700, y: 860 }, 476)).toEqual({ dx: 0, dy: 0, scale: 1 })
+    expect(truePlacement(natural, { x: 650, y: 600 }, 119)).toEqual({ dx: -50, dy: -260, scale: 0.25 })
+  })
+})

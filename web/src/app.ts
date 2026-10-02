@@ -149,6 +149,11 @@ export class App {
       placeWalker: (p) => {
         if (this.world === world) this.walker.place(p)
       },
+      placeWalkerAt: (at) => {
+        if (this.world !== world) return
+        if (at) this.walker.placeAt(at.feet, at.height)
+        else this.walker.place(null)
+      },
       obs: this.config.obs,
       route: () => this.minimap.line,
       activeRoute: () => this.status?.route ?? null,

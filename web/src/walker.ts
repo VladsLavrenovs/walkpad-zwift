@@ -43,6 +43,21 @@ export class Gait {
   }
 }
 
+/** In the walker PNGs (1000 px tall): her feet at 96.3 %, her figure 95.2 % of the height. */
+export const FEET_AT = 0.963
+export const FIGURE_H = 0.952
+
+/**
+ * Move and scale the sprite from its natural spot so her feet land on `feet` (screen pixels)
+ * and she is `heightPx` tall: `natural` is where the sprite's feet are and how tall the figure
+ * is without any transform.
+ */
+export function truePlacement(
+  natural: { feetX: number; feetY: number; figurePx: number }, feet: { x: number; y: number }, heightPx: number,
+): { dx: number; dy: number; scale: number } {
+  return { dx: feet.x - natural.feetX, dy: feet.y - natural.feetY, scale: heightPx / natural.figurePx }
+}
+
 export class Walker {
   readonly el: HTMLDivElement
   private readonly imgs: HTMLImageElement[] = []
@@ -81,6 +96,14 @@ export class Walker {
   place(p: { dx: number; dy: number; scale: number } | null): void {
     this.placement = p ? { ...p, shown: true } : { dx: 0, dy: 0, scale: 1, shown: false }
     this.el.hidden = !(this.wanted && this.placement.shown)
+  }
+
+  /** Stand her on screen point `feet`, `heightPx` tall (a 3D world measures that for her). */
+  placeAt(feet: { x: number; y: number }, heightPx: number): void {
+    const h = this.el.offsetHeight
+    if (!h) return
+    // left: 50% plus translate(-50%): the natural middle is offsetLeft; feet at FEET_AT of the height.
+    this.place(truePlacement({ feetX: this.el.offsetLeft, feetY: this.el.offsetTop + h * FEET_AT, figurePx: h * FIGURE_H }, feet, heightPx))
   }
 
   update(stepsPerSecond: number, speedKmh: number, dt: number): void {

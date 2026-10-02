@@ -21,7 +21,7 @@ import { Kit, BUILDING_MODELS, MODEL_FOR, bake, millBlades } from '../fantasy/as
 import {
   FACES_PATH, QUALITY, type Quality, SMALL_PLANTS, formatClock, hourOfDay, isTimeMode, parseClock, type TimeMode,
 } from '../fantasy/gen'
-import { DEFAULT_VIEW, type OrbitView, clampView, orbitPose, walkerPlacement } from '../fantasy/orbit'
+import { DEFAULT_VIEW, type OrbitView, clampView, orbitPose } from '../fantasy/orbit'
 import { PropLibrary } from '../fantasy/props'
 import { CLOCK, glowPointsMaterial, groundMaterial, noiseTexture, rippleNormals, waterfallMaterial } from '../fantasy/shaders'
 import type { World, WorldContext } from '../world'
@@ -138,7 +138,6 @@ export class OpenWorld implements World {
   // Camera
   private view: OrbitView = { ...DEFAULT_VIEW }
   private shownView: OrbitView = { ...DEFAULT_VIEW }
-  private refCamera = new THREE.PerspectiveCamera(60, 1, 0.3, 4000)
   private pointers = new Map<number, { x: number; y: number }>()
   private pinch = 0
 
@@ -225,8 +224,6 @@ export class OpenWorld implements World {
 
   private fit(): void {
     this.s3.fit()
-    this.refCamera.aspect = this.s3.camera.aspect
-    this.refCamera.updateProjectionMatrix()
   }
 
   private showNote(text: string | null, html = false): void {
@@ -518,22 +515,19 @@ export class OpenWorld implements World {
     return 1
   }
 
+  /** Stand the walker sprite where she is in the scene, true to scale (1.7 m), like the people. */
   private placeWalker(gy: number): void {
     const p = this.player
-    const ref = orbitPose(p.x, p.z, this.camHeading, DEFAULT_VIEW)
-    this.refCamera.position.set(ref.camera.x, gy + ref.camera.y, ref.camera.z)
-    this.refCamera.lookAt(ref.target.x, gy + ref.target.y, ref.target.z)
-    this.refCamera.updateMatrixWorld()
     this.s3.camera.updateMatrixWorld()
     const w = this.root.clientWidth || window.innerWidth
     const h = this.root.clientHeight || window.innerHeight
-    const screen = (camera: THREE.Camera, y: number) => {
-      const v = new THREE.Vector3(p.x, y, p.z).project(camera)
+    const screen = (y: number) => {
+      const v = new THREE.Vector3(p.x, y, p.z).project(this.s3.camera)
       return { x: ((v.x + 1) / 2) * w, y: ((1 - v.y) / 2) * h, behind: v.z > 1 }
     }
-    this.ctx.placeWalker(walkerPlacement(
-      screen(this.s3.camera, gy), screen(this.s3.camera, gy + WALKER_M), screen(this.refCamera, gy), screen(this.refCamera, gy + WALKER_M),
-    ))
+    const feet = screen(gy)
+    const head = screen(gy + WALKER_M)
+    this.ctx.placeWalkerAt(feet.behind || feet.y <= head.y ? null : { feet, height: feet.y - head.y })
   }
 
   // --- saving and following ---------------------------------------------------------------------

@@ -64,7 +64,7 @@ import {
   waterfalls,
 } from './gen'
 import { BUILDING_MODELS, Kit, MODEL_FOR, bake, millBlades } from './assets'
-import { type Box, DEFAULT_VIEW, type OrbitView, clampView, clearance, isDefaultView, orbitPose, walkerPlacement } from './orbit'
+import { type Box, DEFAULT_VIEW, type OrbitView, clampView, clearance, isDefaultView, orbitPose } from './orbit'
 import { FreeWalkProgress } from './freewalk'
 import { PropLibrary } from './props'
 import { CLOCK, SkyDome, glowPointsMaterial, groundMaterial, noiseTexture, rippleNormals, waterfallMaterial } from './shaders'
@@ -207,8 +207,6 @@ export class FantasyWorld implements World {
   /** User camera: where it is going (input) and where it is (damped towards it). */
   private view: OrbitView = { ...DEFAULT_VIEW }
   private shownView: OrbitView = { ...DEFAULT_VIEW }
-  /** The default chase camera, to place the walker sprite relative to her normal spot. */
-  private refCamera = new THREE.PerspectiveCamera(60, 1, 0.2, 1400)
   private pointers = new Map<number, { x: number; y: number }>()
   /** Building footprints near the walker (for the camera), refreshed every 20 m. */
   private nearBuildings: { s: number; boxes: Box[] } = { s: Number.NaN, boxes: [] }
@@ -321,8 +319,6 @@ export class FantasyWorld implements World {
     this.composer?.setSize(w, h)
     this.camera.aspect = w / h
     this.camera.updateProjectionMatrix()
-    this.refCamera.aspect = w / h
-    this.refCamera.updateProjectionMatrix()
     for (const m of [this.sprayMaterial, this.fireflies?.material as THREE.ShaderMaterial | undefined]) {
       if (m) m.uniforms.uPixelRatio.value = this.renderer.getPixelRatio()
     }
@@ -484,25 +480,18 @@ export class FantasyWorld implements World {
   }
 
   /** Keep the walker sprite on her spot in the scene: relative to where the default camera has her. */
-  private placeWalker(here: { x: number; z: number }, heading: number): void {
-    if (isDefaultView(this.shownView) && Math.abs(this.camera.position.y - orbitPose(here.x, here.z, heading, DEFAULT_VIEW).camera.y) < 0.05) {
-      this.ctx.placeWalker({ dx: 0, dy: 0, scale: 1 })
-      return
-    }
-    const ref = orbitPose(here.x, here.z, heading, DEFAULT_VIEW)
-    this.refCamera.position.set(ref.camera.x, ref.camera.y, ref.camera.z)
-    this.refCamera.lookAt(ref.target.x, ref.target.y, ref.target.z)
-    this.refCamera.updateMatrixWorld()
+  /** Stand the walker sprite where she is in the scene, true to scale (1.7 m), like everyone else. */
+  private placeWalker(here: { x: number; z: number }, _heading: number): void {
     this.camera.updateMatrixWorld()
     const w = this.root.clientWidth || window.innerWidth
     const h = this.root.clientHeight || window.innerHeight
-    const screen = (camera: THREE.Camera, y: number) => {
-      const p = new THREE.Vector3(here.x, y, here.z).project(camera)
+    const screen = (y: number) => {
+      const p = new THREE.Vector3(here.x, y, here.z).project(this.camera)
       return { x: ((p.x + 1) / 2) * w, y: ((1 - p.y) / 2) * h, behind: p.z > 1 }
     }
-    this.ctx.placeWalker(walkerPlacement(
-      screen(this.camera, 0), screen(this.camera, WALKER_M), screen(this.refCamera, 0), screen(this.refCamera, WALKER_M),
-    ))
+    const feet = screen(0)
+    const head = screen(WALKER_M)
+    this.ctx.placeWalkerAt(feet.behind || feet.y <= head.y ? null : { feet, height: feet.y - head.y })
   }
 
   /** Remote viewers (read-only) cannot change a trail; a free walk is this browser's own. */

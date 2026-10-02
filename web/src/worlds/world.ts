@@ -18,6 +18,11 @@ export interface WorldContext {
    * a world whose camera can move; null hides her. Worlds that never call it leave her in place.
    */
   placeWalker(p: { dx: number; dy: number; scale: number } | null): void
+  /**
+   * Stand the walker on screen point `feet` (pixels, in the world's container), `height` pixels
+   * tall: a 3D world projects her real 1.7 m there, so she is true to scale with its people.
+   */
+  placeWalkerAt(at: { feet: { x: number; y: number }; height: number } | null): void
   /** true for `?view=obs`: no world UI either. */
   obs: boolean
   /** The active route's shape, once loaded (null: no active route, or a trail without a map). */

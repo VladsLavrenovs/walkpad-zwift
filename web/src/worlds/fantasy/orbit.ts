@@ -2,7 +2,8 @@
  * The fantasy world's user camera: orbit around the walker (yaw), look from lower or higher
  * (elevation) and zoom, on top of the damped chase camera. Pure maths, unit-tested.
  *
- * The default view is exactly the classic chase camera: 7 m behind, 3.2 m up, looking 9 m ahead.
+ * The default view is a close chase camera: 3.6 m behind, 2 m up, looking 9 m ahead (the walker is
+ * true to scale, so this keeps her a good size on screen).
  */
 
 export interface OrbitView {
@@ -14,15 +15,15 @@ export interface OrbitView {
   zoom: number
 }
 
-const BACK_M = 7
-const UP_M = 3.2
+const BACK_M = 3.6
+const UP_M = 2
 const LOOK_AHEAD_M = 9
 const TARGET_Y = 1.1
 const DISTANCE_M = Math.hypot(BACK_M, UP_M)
 const ELEVATION0 = (Math.atan2(UP_M, BACK_M) * 180) / Math.PI
 
 export const DEFAULT_VIEW: OrbitView = { yaw: 0, elevation: ELEVATION0, zoom: 1 }
-export const LIMITS = { elevation: [4, 80] as const, zoom: [0.35, 4] as const }
+export const LIMITS = { elevation: [4, 80] as const, zoom: [0.4, 8] as const }
 
 export function clampView(v: OrbitView): OrbitView {
   const yaw = ((((v.yaw + 180) % 360) + 360) % 360) - 180

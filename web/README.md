@@ -153,10 +153,10 @@ own ~700 KB chunk, plus ~2 MB of models and textures from `public/worlds/fantasy
   the active trail this changes its seed and starting biome on the bridge (progress stays; needs
   local control, read-only viewers see the button disabled); for a free walk it is stored in this
   browser.
-- Same smooth motion and damped chase camera maths as the other worlds (7 m behind, 3.2 m up,
+- Same smooth motion and damped chase camera maths as the other worlds (3.6 m behind, 2 m up,
   looking 9 m ahead); the walker sprite stays.
 - **Camera**: drag to turn around the walker (left/right) and look from lower or higher
-  (up/down); mouse wheel or pinch to zoom (0.35× to 4×); double-click or "⟲ Reset camera" for
+  (up/down); mouse wheel or pinch to zoom (0.4× to 8×); double-click or "⟲ Reset camera" for
   the default view. Remembered in this browser; OBS view always uses the default. The camera
   moves in towards the walker rather than into a building, and more terrain is kept behind when
   you look back. **The walker is true to scale** in both 3D worlds (Fantasy trail and Open

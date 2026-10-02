@@ -125,6 +125,11 @@ export class Progress {
     }
   }
 
+  /** A fresh profile from the bridge (e.g. after a quest): bar and news. */
+  update(p: GameProfile): void {
+    this.show(p)
+  }
+
   private show(p: GameProfile): void {
     for (const line of profileNews(this.profile, p)) this.toast(line, line.startsWith('Level') ? 'level' : 'achievement')
     this.profile = p
@@ -137,7 +142,7 @@ export class Progress {
     this.bar.title = `${p.xp} XP in total (walking ${p.breakdown.walking}, discoveries ${p.breakdown.discoveries}, achievements ${p.breakdown.achievements})`
   }
 
-  private toast(text: string, kind: string): void {
+  toast(text: string, kind: string): void {
     const el = document.createElement('div')
     el.className = `ow-toast ow-toast-${kind}`
     el.textContent = text

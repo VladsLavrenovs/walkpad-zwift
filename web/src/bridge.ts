@@ -67,9 +67,25 @@ export interface GameProfile {
   level: number
   level_start_xp: number
   next_level_xp: number
-  breakdown: { walking: number; discoveries: number; achievements: number }
+  breakdown: { walking: number; discoveries: number; quests?: number; achievements: number }
   metrics: Record<string, number>
   achievements: Achievement[]
+}
+
+/** A quest taken from an NPC in the open world. */
+export interface Quest {
+  world_id: number
+  /** "<giver npc id>:<n>" */
+  id: string
+  title: string
+  kind: 'deliver' | 'visit' | 'explore'
+  data: Record<string, string | number>
+  xp: number
+  state: 'active' | 'done' | 'failed' | 'abandoned'
+  /** Metres: walked towards the target, or through the land. */
+  progress: number
+  accepted_at: number
+  finished_at: number | null
 }
 
 export type DiscoveryKind = 'place' | 'province' | 'biome'
@@ -436,6 +452,18 @@ export class BridgeClient {
 
   async discoveries(worldId: number): Promise<Discovery[]> {
     return (await this.get<{ discoveries: Discovery[] }>(`/worlds/${worldId}/discoveries`)).discoveries
+  }
+
+  async quests(worldId: number): Promise<Quest[]> {
+    return (await this.get<{ quests: Quest[] }>(`/worlds/${worldId}/quests`)).quests
+  }
+
+  takeQuest(worldId: number, q: { id: string; title: string; kind: Quest['kind']; data: Record<string, string | number>; xp: number }): Promise<Quest> {
+    return this.write('POST', `/worlds/${worldId}/quests`, q)
+  }
+
+  updateQuest(worldId: number, id: string, fields: { progress?: number; state?: 'done' | 'failed' | 'abandoned' }): Promise<{ quest: Quest; profile: GameProfile }> {
+    return this.write('PATCH', `/worlds/${worldId}/quests/${encodeURIComponent(id)}`, fields)
   }
 
   /** First visits in a world; the bridge gives XP for the new ones. */

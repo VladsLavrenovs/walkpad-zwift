@@ -31,8 +31,11 @@ import { fieldAt, plantTile } from './flora'
 import { Ground, riverHalfWidth } from './ground'
 import { colorAt } from './mapdraw'
 import { STEER_KEYS, TURN_RATE, step } from './movement'
+import { People } from './people'
 import { Progress } from './progress'
+import { cardParts } from './cards'
 import { Scene3d } from './scene'
+import { FAR_BLOCK, SPRITE_TREES, type TreeCard, TreeImpostors, farBlockTrees } from './sprites'
 import { type Building, type Footprint, type TownProp, insideFoot, layoutTowns } from './towns'
 
 const TILE = 64
@@ -40,7 +43,9 @@ const FINE_M = 190
 const WALKER_M = 1.7
 const SAVE_EVERY_S = 4
 const KEYS = { quality: 'walkpad.openworld.quality', time: 'walkpad.openworld.time', clock: 'walkpad.openworld.clock', view: 'walkpad.openworld.camera' }
-const FAR_KINDS = new Set(['pine', 'oak', 'birch', 'rock'])
+const FAR_KINDS = new Set(['rock']) // trees far away are sprites (sprites.ts)
+/** How far the sprite forest reaches, by quality. */
+const FOREST_M = { high: 1900, medium: 1300, low: 800 }
 const RIVER_DROP = 1.5 - 0.55 // ground is carved this much below the grid; water sits 0.55 above the bed
 
 const color = (hex: string) => new THREE.Color(hex)
@@ -108,6 +113,13 @@ export class OpenWorld implements World {
   private farHole = { value: new THREE.Vector3(0, 0, 0) }
   private sea!: THREE.Mesh
   private tiles = new Map<string, Tile>()
+  private impostors: TreeImpostors | null = null
+  /** Grass and crops as crossed painted cards (cards.ts); null: the 3D blades. */
+  private cards: ReturnType<typeof cardParts> | null = cardParts()
+  /** The same cards, but not drawn where the terrain tiles have their own trees. */
+  private farCardMaterial: THREE.ShaderMaterial | null = null
+  private forest = new Map<string, THREE.Mesh>()
+  private cardLight = new THREE.Color(1, 1, 1)
   private kitReady = false
 
   // The walker
@@ -135,6 +147,7 @@ export class OpenWorld implements World {
   private where!: HTMLDivElement
   private banner!: HTMLDivElement
   private progress!: Progress
+  private people!: People
   private minimap!: HTMLCanvasElement
   private mapImage: HTMLCanvasElement | null = null
   private miniAt = 0
@@ -158,7 +171,7 @@ export class OpenWorld implements World {
     this.root = document.createElement('div')
     this.root.className = 'fantasy-world openworld'
     this.root.innerHTML = `
-      <div class="ow-compass"><div class="ow-strip"></div><span class="ow-needle"></span></div>
+      <div class="ow-compass"><div class="ow-strip"></div><span class="ow-needle"></span><span class="ow-goal" hidden>◆</span></div>
       <div class="ow-where"></div>
       <div class="ow-banner" hidden></div>
       <canvas class="ow-minimap" width="190" height="190"></canvas>
@@ -182,6 +195,8 @@ export class OpenWorld implements World {
     ripples.repeat.set(0.08, 0.08)
     this.textures.push(noise, ripples)
     this.groundMat = groundMaterial(noise, this.kit.materials.uneven.map!)
+    this.makeImpostors()
+    this.people = new People(this.root, this.s3.scene, ctx.bridge, () => ctx.canEdit(), this.progress)
     this.waterMat = new THREE.MeshStandardMaterial({
       color: '#2f6a80', roughness: 0.06, metalness: 0.1, transparent: true, opacity: 0.88,
       normalMap: ripples, normalScale: new THREE.Vector2(0.6, 0.6), side: THREE.DoubleSide,
@@ -285,6 +300,7 @@ export class OpenWorld implements World {
     this.showNote(null)
     this.renderMapImage()
     void this.progress.start(saved.id)
+    void this.people.start(c, saved.id)
   }
 
   /** The whole island, low detail, a little below the tiles (they cover it near you). */
@@ -324,6 +340,55 @@ export class OpenWorld implements World {
     this.far = new THREE.Mesh(geo, this.farMaterial())
     this.far.frustumCulled = false
     this.s3.scene.add(this.far)
+  }
+
+  /** Photograph the trees for the far sprites (again after a new renderer: textures belong to it). */
+  private makeImpostors(): void {
+    this.impostors?.dispose()
+    this.farCardMaterial?.dispose()
+    for (const m of this.forest.values()) {
+      this.s3.scene.remove(m)
+      m.geometry.dispose()
+    }
+    this.forest.clear()
+    this.impostors = new TreeImpostors(this.s3.renderer, this.props)
+    this.farCardMaterial = this.impostors.material.clone()
+    this.farCardMaterial.uniforms.uAtlas.value = this.impostors.material.uniforms.uAtlas.value
+  }
+
+  /** The sprite forest beyond the tiles, in big blocks; at most one new block per call. */
+  private streamForest(): boolean {
+    const c = this.c
+    const g = this.ground
+    if (!c || !g || !this.impostors || !this.farCardMaterial) return false
+    const p = this.player
+    const reach = FOREST_M[this.quality]
+    const want = new Map<string, { bx: number; bz: number; d: number }>()
+    const n = Math.ceil(WORLD_M / FAR_BLOCK)
+    for (let bz = 0; bz < n; bz++) {
+      for (let bx = 0; bx < n; bx++) {
+        const cx = Math.max(bx * FAR_BLOCK, Math.min(p.x, (bx + 1) * FAR_BLOCK))
+        const cz = Math.max(bz * FAR_BLOCK, Math.min(p.z, (bz + 1) * FAR_BLOCK))
+        const d = Math.hypot(cx - p.x, cz - p.z)
+        if (d < reach) want.set(`${bx},${bz}`, { bx, bz, d })
+      }
+    }
+    for (const [key, mesh] of this.forest) {
+      if (want.has(key)) continue
+      this.s3.scene.remove(mesh)
+      mesh.geometry.dispose()
+      this.forest.delete(key)
+    }
+    const next = [...want.entries()].filter(([key]) => !this.forest.has(key)).sort((a, b) => a[1].d - b[1].d)[0]
+    if (!next) return false
+    const [key, { bx, bz }] = next
+    const mesh = this.impostors.mesh(farBlockTrees(c, g, bx, bz))
+    if (mesh) {
+      mesh.material = this.farCardMaterial
+      this.s3.scene.add(mesh)
+    }
+    this.forest.set(key, mesh ?? new THREE.Mesh()) // an empty block is remembered too
+    return true
   }
 
   /** The far mesh is cut away where the detailed tiles are (no poking through near rivers). */
@@ -400,11 +465,22 @@ export class OpenWorld implements World {
 
     const w = g.biomes(p.x, p.z)
     this.progress.tick(dt, this.c, p.x, p.z, w)
+    const dominant = OW_BIOMES.reduce((a, b) => (w[b] > w[a] ? b : a))
+    this.people.tick(dt, Date.now() / 1000, p.x, p.z, (x, z) => g.height(x, z),
+      this.ctx.canEdit() ? metres : 0, w[dominant] > 0.6 ? dominant : null, this.cardLight)
     const night = this.s3.atmosphere(hour, w, { x: p.x, y: gy, z: p.z }, dt, this.kitReady ? this.kit : null)
     this.fallMat.uniforms.uLight.value = 0.25 + (1 - night) * 0.85
     this.sprayMat.uniforms.uAlpha.value = 0.18 + (1 - night) * 0.25
     this.sea.position.set(p.x, 0, p.z)
     this.farHole.value.set(p.x, p.z, QUALITY[this.quality].viewM - TILE * 0.8)
+    if (this.impostors && this.farCardMaterial) {
+      // The photos carry daylight: darken (and cool) them towards night like the 3D trees.
+      const day = 1 - night
+      this.cardLight.setRGB(0.1 + 0.9 * day, 0.11 + 0.89 * day, 0.16 + 0.84 * day)
+      this.impostors.setLight(this.cardLight)
+      this.farCardMaterial.uniforms.uLight.value.copy(this.cardLight)
+      this.farCardMaterial.uniforms.uHole.value.set(p.x, p.z, QUALITY[this.quality].viewM - TILE * 0.5)
+    }
     for (const tile of this.tiles.values()) for (const s of tile.spinners) s.rotateZ(dt * 0.55)
     this.updateSmallVisibility()
     this.s3.render()
@@ -531,6 +607,7 @@ export class OpenWorld implements World {
       }
       if (work) break
     }
+    if (!work) work = this.streamForest()
     if (work) this.buildMs = Math.max(performance.now() - t0, this.buildMs * 0.98)
   }
 
@@ -770,13 +847,24 @@ export class OpenWorld implements World {
     add(new THREE.Points(spray, this.sprayMat), spray)
   }
 
-  private addPlants(tile: Tile, x0: number, z0: number, level: 0 | 1, add: (o: THREE.Object3D) => void): void {
+  private addPlants(tile: Tile, x0: number, z0: number, level: 0 | 1, add: (o: THREE.Object3D, g?: THREE.BufferGeometry) => void): void {
     const q = QUALITY[this.quality]
     const g = this.ground!
-    let plants = plantTile(g, this.c!.seed, x0, z0, TILE, q.density, level === 0 ? q.density * 0.45 : 0,
+    // Cards are cheap: twice as much grass and crops for the same cost.
+    const smallDensity = level === 0 ? q.density * 0.45 * (this.cards ? 2 : 1) : 0
+    let plants = plantTile(g, this.c!.seed, x0, z0, TILE, q.density, smallDensity,
       (x, z) => (this.feet.get(bucket(x, z)) ?? []).some((f) => insideFoot(f, x, z, 1.2)))
-    // Far tiles: only what reads at a distance (trees and rocks), a few draw calls each.
-    if (level === 1) plants = plants.filter((p) => FAR_KINDS.has(p.kind))
+    // Far tiles: trees as sprite cards (one draw call), rocks in 3D, nothing small.
+    if (level === 1) {
+      const cards: TreeCard[] = plants.filter((p) => SPRITE_TREES.includes(p.kind))
+        .map((p) => ({ ...p, y: g.height(p.x, p.z) - 0.05 }))
+      const mesh = this.impostors?.mesh(cards)
+      if (mesh) {
+        add(mesh)
+        tile.owned.push(mesh.geometry)
+      }
+      plants = plants.filter((p) => FAR_KINDS.has(p.kind))
+    }
     for (const tp of level === 0 ? this.townProps : []) {
       if (tp.x >= x0 && tp.x < x0 + TILE && tp.z >= z0 && tp.z < z0 + TILE) plants.push({ ...tp, scale: 1 })
     }
@@ -792,7 +880,8 @@ export class OpenWorld implements World {
     const white = new THREE.Color(1, 1, 1)
     for (const [kind, list] of byKind) {
       const small = SMALL_PLANTS.includes(kind as never)
-      for (const part of this.props.parts[kind as keyof PropLibrary['parts']]) {
+      const parts = this.cards?.parts[kind as keyof PropLibrary['parts']] ?? this.props.parts[kind as keyof PropLibrary['parts']]
+      for (const part of parts) {
         const mesh = new THREE.InstancedMesh(part.geometry, part.material, list.length)
         list.forEach((p, i) => {
           quat.setFromAxisAngle(up, FACES_PATH.includes(kind as never) ? p.rotation : p.rotation)
@@ -878,6 +967,21 @@ export class OpenWorld implements World {
     const deg = ((p.heading * 180) / Math.PI + 360) % 360
     const strip = this.compass.querySelector<HTMLElement>('.ow-strip')!
     strip.style.transform = `translateX(${-(deg + 360) * 4 + this.compass.clientWidth / 2}px)`
+    // The tracked quest's destination on the compass, and how far.
+    const goal = this.people.target()
+    const mark = this.compass.querySelector<HTMLElement>('.ow-goal')!
+    let goalText: string | null = null
+    if (goal) {
+      const bearing = ((Math.atan2(goal.x - p.x, goal.z - p.z) * 180) / Math.PI + 360) % 360
+      const rel = ((bearing - deg + 540) % 360) - 180
+      const half = this.compass.clientWidth / 2
+      mark.hidden = false
+      mark.style.left = `${Math.max(6, Math.min(this.compass.clientWidth - 6, half + rel * 4))}px`
+      const d = Math.hypot(goal.x - p.x, goal.z - p.z)
+      goalText = `→ ${goal.name} ${d < 950 ? `${Math.round(d / 10) * 10} m` : `${(d / 1000).toFixed(1)} km`}`
+    } else {
+      mark.hidden = true
+    }
     const c = this.c!
     const prov = c.province[cellAt(c, p.x, p.z)]
     const province = prov >= 0 ? c.provinces[prov]?.name : null
@@ -895,7 +999,7 @@ export class OpenWorld implements World {
       }
     }
     const biome = OW_BIOMES.reduce((a, b) => (w[b] > w[a] ? b : a))
-    this.where.textContent = [province, near ? (nearD < 120 ? near : `near ${near}`) : null, OW_BIOME_NAMES[biome], this.held ? 'blocked: turn A / D' : null]
+    this.where.textContent = [province, near ? (nearD < 120 ? near : `near ${near}`) : null, OW_BIOME_NAMES[biome], goalText, this.held ? 'blocked: turn A / D' : null]
       .filter(Boolean).join(' · ')
     this.miniAt -= 1
     if (this.miniAt <= 0) {
@@ -910,6 +1014,7 @@ export class OpenWorld implements World {
         `biome ${OW_BIOMES.filter((b) => w[b] > 0.02).map((b) => `${b} ${(w[b] * 100).toFixed(0)}%`).join(', ')}`,
         `walked here ${(this.walkedHere / 1000).toFixed(2)} km · total ${((this.walkedBase + this.walkedHere) / 1000).toFixed(2)} km`,
         `fps ${this.fps.toFixed(0)}  ·  draw calls ${info.calls}  ·  triangles ${info.triangles}`,
+        `far forest ${[...this.forest.values()].reduce((n, m) => n + ((m.geometry as THREE.InstancedBufferGeometry).instanceCount ?? 0), 0)} sprite trees in ${this.forest.size} blocks (to ${FOREST_M[this.quality]} m)`,
         `tiles ${this.tiles.size} (build ≤ ${this.buildMs.toFixed(1)} ms)  ·  quality ${this.quality}  ·  kit ${this.kitReady ? 'ready' : 'loading'}`,
       ].join('\n')
     }
@@ -993,6 +1098,27 @@ export class OpenWorld implements World {
       ctx.fillStyle = pl.kind === 'castle' ? '#5a2d5c' : pl.kind === 'waterfall' ? '#1f5f9a' : '#2b2017'
       ctx.fillRect(dx - 2, dy - 2, pl.kind === 'city' ? 6 : 4, pl.kind === 'city' ? 6 : 4)
     }
+    // The tracked quest's destination: a gold diamond (on the rim when it is further away).
+    const goal = this.people.target()
+    if (goal) {
+      let gx = (goal.x - p.x) * scale
+      let gy = -(goal.z - p.z) * scale
+      const len = Math.hypot(gx, gy)
+      const rim = S / 2 - 10
+      if (len > rim) {
+        gx *= rim / len
+        gy *= rim / len
+      }
+      ctx.save()
+      ctx.translate(S / 2 + gx, S / 2 + gy)
+      ctx.rotate(Math.PI / 4)
+      ctx.fillStyle = '#ffd34d'
+      ctx.strokeStyle = '#4a3200'
+      ctx.lineWidth = 1.5
+      ctx.fillRect(-5, -5, 10, 10)
+      ctx.strokeRect(-5, -5, 10, 10)
+      ctx.restore()
+    }
     ctx.restore()
     // The walker: an arrow pointing where she faces.
     ctx.save()
@@ -1030,7 +1156,7 @@ export class OpenWorld implements World {
       <label>quality <select class="fq"><option value="high">high</option><option value="medium">medium</option><option value="low">low</option></select></label>
       <label>time <select class="ft"><option value="cycle">day cycle</option><option value="real">real time</option><option value="fixed">fixed time</option></select>
         <input type="time" class="fclock" step="300" aria-label="time of day"></label>
-      <span class="fantasy-hint muted">A / D: turn · drag: look · wheel: zoom</span>
+      <span class="fantasy-hint muted">A / D: turn · F: talk · J: quests · drag: look · wheel: zoom</span>
       <button type="button" class="ow-map">Map (M)</button>`
     const fq = bar.querySelector<HTMLSelectElement>('.fq')!
     const ft = bar.querySelector<HTMLSelectElement>('.ft')!
@@ -1045,6 +1171,7 @@ export class OpenWorld implements World {
       this.s3.quality = this.quality
       this.s3.makeRenderer()
       this.fit()
+      this.makeImpostors()
       for (const t of [...this.tiles.values()]) this.dropTile(t)
     }
     ft.onchange = () => {
@@ -1074,6 +1201,7 @@ export class OpenWorld implements World {
     if (t instanceof HTMLInputElement || t instanceof HTMLSelectElement || t instanceof HTMLTextAreaElement) return
     if (e.ctrlKey || e.metaKey || e.altKey) return
     if (e.code in STEER_KEYS) this.turn.add(e.code)
+    else if (this.people?.key(e.code)) e.preventDefault()
     else if (e.code === 'KeyM' && !this.ctx.obs) location.hash = '#/worldmap'
     else if (e.code === 'Backquote') {
       this.debug = !this.debug
@@ -1140,6 +1268,11 @@ export class OpenWorld implements World {
     this.resize.disconnect()
     for (const t of [...this.tiles.values()]) this.dropTile(t)
     this.far?.geometry.dispose()
+    for (const m of this.forest.values()) m.geometry.dispose()
+    this.impostors?.dispose()
+    this.farCardMaterial?.dispose()
+    this.cards?.dispose()
+    this.people.dispose()
     this.sea.geometry.dispose()
     this.props.dispose()
     this.kit.dispose()

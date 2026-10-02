@@ -253,18 +253,47 @@ position the bridge has.
   the same kit as the fantasy trail and baked per tile.
 - **Plants** (`openworld/flora.ts`): the fantasy prop tables as densities per square metre,
   chosen by the biome mix; crops in their field patches.
+- **Sprites for the far and the small** (`openworld/sprites.ts`, `cards.ts`):
+  - **far trees:** each tree kind is photographed from 8 directions into one texture at load,
+    from the same 3D trees used up close. Beyond 190 m a tree is a single card that turns to
+    face you (around the vertical only) and shows the photo from your side; darkened at night
+    like the 3D trees. One draw call per tile.
+  - **sprite forest to the horizon:** sparse tree cards in 512 m blocks out to 1.9 km (high),
+    1.3 km (medium) or 0.8 km (low), beyond the terrain tiles: about 24,000 trees in ~50
+    draw calls.
+  - **grass, wheat, lavender, ferns** as three crossed painted cards (textures painted in
+    code): 6 triangles instead of 30-40, so twice as dense for the same cost; they sway in the
+    wind. Rocks, barrels, crates and buildings stay 3D.
 - **Walking** (`openworld/movement.ts`): buildings, cliffs, lakes and the sea stop you; you
   slide along walls; nearly head-on, you stop and the HUD says to turn.
 - **HUD:** compass, where you are (province · nearest place · biome), a banner when you enter
   a new province, a north-up minimap. Quality, time of day and a debug panel (`` ` ``) as in the
   fantasy world.
 
+**People and quests** (`openworld/npcs.ts`, `quests.ts`, `people.ts`, `npcsprites.ts`):
+
+- Every village, city and castle has a **quest giver** standing by the square (a gold **!** over
+  their head while they have a task) and **townsfolk** walking up and down the streets (their
+  positions follow the clock, so every page shows them in the same place).
+- **F** near someone: talk. A giver offers a quest: **F** to take it, **N** for not now. One quest
+  at a time per giver, up to 5 at once; each giver has an endless series.
+- **Quests** are made up from the world and finish by walking, nothing to press on the way:
+  *deliver* something to another town (done on arrival), *visit* a waterfall, ruins, castle or
+  windmill (done when close), *explore* a distance through one kind of land (only metres walked
+  there count). XP by distance (40-500).
+- The tracked quest's destination is a gold ◆ on the compass and the minimap, with the distance
+  in the line under the compass. **J** opens the quest log (progress, track, drop).
+- **Sprites:** people are cards like the far trees, with a sheet per look (8 directions x
+  standing + 4 walking frames). Real art goes in `public/worlds/openworld/npc/look-0.png` ...
+  `look-7.png` (format in that folder's README); until then a simple placeholder figure is
+  painted in code.
+
 **Progression** (one character across all worlds; the bridge keeps the numbers):
 
 - **XP:** walking, 1 XP per 10 m (every walk, any world, including the one going on);
   **discoveries** in the open world, first time per world: cities and castles 100, ruins and
   waterfalls 75, villages 50, windmills 25, a new province 150, a new kind of land 100;
-  **achievements** (26: distance, walks in one go, streaks, number of walks, places, castles,
+  **quests** (their XP once done); **achievements** (29: distance, walks in one go, streaks, number of walks, places, castles,
   waterfalls, provinces, all five kinds of land...), each worth XP once unlocked.
 - **Levels:** level L needs 50 x L x (L - 1) XP in total (100 for level 2, 300 for 3, 4500
   for 10).
@@ -291,6 +320,8 @@ position the bridge has.
 | `openworld/towns.ts`, `flora.ts` | Buildings and plants, deterministic |
 | `openworld/progress.ts` | Discoveries, XP bar and toasts in the open world; unit-tested |
 | `profile.ts` | The Profile page |
+| `openworld/sprites.ts`, `cards.ts` | Tree photos and cards, the far forest; crossed plant cards |
+| `openworld/npcs.ts`, `quests.ts`, `people.ts`, `npcsprites.ts` | NPCs, quests, talking and the quest log, NPC sprite sheets; unit-tested |
 | `openworld/movement.ts` | Walking and steering (keys never overlap the belt keys) |
 | `openworld/scene.ts`, `world.ts` | The 3D world: renderer and atmosphere; tiles, water, camera, HUD, saving |
 | `openworld/openworld.test.ts` | Ground, towns, plants, walking, and "no belt calls" |

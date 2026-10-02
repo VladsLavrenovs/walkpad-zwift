@@ -16,7 +16,7 @@ from conftest import VirtualClock, run_until
 from walkpad_bridge.config import Config, StorageConfig
 from walkpad_bridge.fake import FakeBackend
 from walkpad_bridge.service import BridgeService
-from walkpad_bridge.storage import Store, Totals
+from walkpad_bridge.storage import SCHEMA_VERSION, Store, Totals
 
 TUNNEL = {**H, "Cf-Connecting-Ip": "8.8.8.8"}
 
@@ -61,7 +61,7 @@ def test_discoveries_give_xp_once_and_unlock_achievements(client: TestClient) ->
     assert [(d["key"], d["xp"]) for d in out["new"]] == [("city-0", 100), ("2", 150), ("forest", 100)]
     city = next(a for a in out["profile"]["achievements"] if a["id"] == "city-lights")
     assert city["unlocked_at"] is not None  # "Reach a city"
-    assert out["profile"]["breakdown"] == {"walking": 0, "discoveries": 350, "achievements": 50}
+    assert out["profile"]["breakdown"] == {"walking": 0, "discoveries": 350, "quests": 0, "achievements": 50}
     assert (out["profile"]["xp"], out["profile"]["level"]) == (400, 3)
     # The same again: nothing new, no more XP.
     again = client.post(f"/worlds/{world['id']}/discoveries", json=body, headers=H).json()
@@ -126,7 +126,7 @@ def test_v7_database_gains_the_progression_tables(tmp_path: Path) -> None:
     db.executescript("CREATE TABLE videos (id INTEGER PRIMARY KEY, video_id TEXT); PRAGMA user_version = 7;")
     db.close()
     store = Store(path)
-    assert store.db.execute("PRAGMA user_version").fetchone()[0] == 8
+    assert store.db.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
     assert store.add_discoveries(1, [("biome", "forest", 100)], now=3)[0]["xp"] == 100
 
 

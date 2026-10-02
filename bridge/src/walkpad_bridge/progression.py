@@ -1,9 +1,10 @@
 """Open-world progression: experience, levels and achievements of the walker (one character
 across all worlds).
 
-XP comes from three places:
+XP comes from four places:
 - walking: every metre on the pad counts (all sessions, any world), 1 XP per 10 m;
 - discoveries in the open world: places, provinces and biomes, first time per world;
+- quests from NPCs in the open world: their XP once done (QUEST_XP_MAX at most);
 - achievements: data-driven goals (ACHIEVEMENTS) on distance, sessions, streaks and
   discoveries, each worth some XP once unlocked. Unlocks are stored, so they are never lost.
 
@@ -23,6 +24,9 @@ PLACE_XP = {"city": 100, "castle": 100, "village": 50, "ruins": 75, "waterfall":
 PROVINCE_XP = 150
 BIOME_XP = 100
 BIOMES = ("forest", "ruins", "meadow", "fields", "falls")
+QUEST_KINDS = ("deliver", "visit", "explore")
+QUEST_XP_MAX = 600
+MAX_ACTIVE_QUESTS = 5
 PLACE_KEY = re.compile(r"^(city|village|castle|ruins|windmill|waterfall)-\d{1,4}$")
 
 
@@ -89,10 +93,14 @@ ACHIEVEMENTS: tuple[Achievement, ...] = (
     Achievement("every-corner", "Every corner", "Walk in all 5 kinds of land", "biomes", 5, 250),
     Achievement("explorer", "Explorer", "Discover 25 places", "places", 25, 300),
     Achievement("cartographer", "Cartographer", "Discover 75 places", "places", 75, 1000),
+    Achievement("helping-hand", "A helping hand", "Finish a quest", "quests", 1, 50),
+    Achievement("courier", "Trusted courier", "Finish 10 quests", "quests", 10, 400),
+    Achievement("hero", "Local hero", "Finish 30 quests", "quests", 30, 1200),
 )
 
 
-def metrics(stats: dict[str, Any], live_m: float, discoveries: list[dict[str, Any]]) -> dict[str, float]:
+def metrics(stats: dict[str, Any], live_m: float, discoveries: list[dict[str, Any]],
+            quests: list[dict[str, Any]] | None = None) -> dict[str, float]:
     """Everything the achievements look at. `stats` is stats.compute_stats() of finished sessions;
     `live_m` the open session's distance; `discoveries` all discoveries in all worlds."""
     places = [d for d in discoveries if d["kind"] == "place"]
@@ -112,6 +120,7 @@ def metrics(stats: dict[str, Any], live_m: float, discoveries: list[dict[str, An
         "windmills": kind_of.count("windmill"),
         "provinces": sum(1 for d in discoveries if d["kind"] == "province"),
         "biomes": len({d["key"] for d in discoveries if d["kind"] == "biome"}),
+        "quests": sum(1 for q in quests or [] if q["state"] == "done"),
     }
 
 
@@ -119,19 +128,21 @@ def newly_unlocked(values: dict[str, float], unlocked: dict[str, float]) -> list
     return [a for a in ACHIEVEMENTS if a.id not in unlocked and values[a.metric] >= a.target]
 
 
-def profile(values: dict[str, float], discoveries: list[dict[str, Any]], unlocked: dict[str, float]) -> dict[str, Any]:
+def profile(values: dict[str, float], discoveries: list[dict[str, Any]], unlocked: dict[str, float],
+            quests: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     """The walker's level, XP and achievements. `unlocked` maps achievement id -> unlock time."""
     walking = int(values["distance_km"] * 1000 * WALK_XP_PER_M)
     found = sum(int(d["xp"]) for d in discoveries)
     earned = sum(a.xp for a in ACHIEVEMENTS if a.id in unlocked)
-    xp = walking + found + earned
+    quested = sum(int(q["xp"]) for q in quests or [] if q["state"] == "done")
+    xp = walking + found + earned + quested
     level = level_for(xp)
     return {
         "xp": xp,
         "level": level,
         "level_start_xp": level_start(level),
         "next_level_xp": level_start(level + 1),
-        "breakdown": {"walking": walking, "discoveries": found, "achievements": earned},
+        "breakdown": {"walking": walking, "discoveries": found, "quests": quested, "achievements": earned},
         "metrics": {k: round(v, 3) for k, v in values.items()},
         "achievements": [
             {

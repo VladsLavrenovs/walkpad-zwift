@@ -69,6 +69,8 @@ export class ProfilePage {
           <span class="muted">1 XP per 10 m, every walk</span></div>
         <div class="tile"><span class="label">From discoveries</span><span class="big">${p.breakdown.discoveries}</span>
           <span class="muted">${plural(m.places, 'place')} · ${plural(m.provinces, 'province')} · ${plural(m.biomes, 'kind')} of land</span></div>
+        <div class="tile"><span class="label">From quests</span><span class="big">${p.breakdown.quests ?? 0}</span>
+          <span class="muted">${plural(m.quests ?? 0, 'quest')} done for the people of the Open world</span></div>
         <div class="tile"><span class="label">From achievements</span><span class="big">${p.breakdown.achievements}</span>
           <span class="muted">${done.length} of ${p.achievements.length} unlocked</span></div>
       </div>

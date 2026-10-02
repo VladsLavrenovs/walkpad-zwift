@@ -88,6 +88,15 @@ possible. Tick them off there.
       progress; unlocked ones with their date.
 - [ ] Walks in other worlds also add walking XP. On the world map, discovered places have a ✓.
 
+## Open world: sprites, people and quests
+
+- [ ] Far trees and the forest out to the horizon look right by day and night (no flicker
+      where 3D trees turn into sprites at about 190 m); wheat, lavender and grass look full.
+- [ ] People walk the streets of villages and towns; quest givers have a gold "!".
+- [ ] F near a giver: dialog; F takes the quest (toast, ◆ on compass and minimap), N declines.
+- [ ] Walking to the destination finishes the quest by itself (toast, XP); J shows the log.
+- [ ] Still 60 fps on the PC at high in a town full of people.
+
 ## Prompt 8 (Cloudflare: Workers deploy, Tunnel, Access) — setup: [cloudflare.md](cloudflare.md)
 
 - [ ] `walkpad-tunnel` service active and the tunnel **Healthy** in the dashboard; it comes back

@@ -242,7 +242,8 @@ class BridgeService:
         stats = compute_stats(self.store.finished_sessions(), now=self.wall_clock())
         live_m = self.recorder.totals.distance_m if self.recorder.session_id is not None else 0.0
         found = self.store.discoveries()
-        values = progression.metrics(stats, live_m, found)
+        quests = self.store.quests()
+        values = progression.metrics(stats, live_m, found, quests)
         unlocked = self.store.unlocked_achievements()
         new = progression.newly_unlocked(values, unlocked)
         if new:
@@ -250,7 +251,7 @@ class BridgeService:
             self.store.unlock_achievements([a.id for a in new], now)
             unlocked.update({a.id: now for a in new})
             log.info("achievements unlocked: %s", ", ".join(a.title for a in new))
-        return progression.profile(values, found, unlocked)
+        return progression.profile(values, found, unlocked, quests)
 
     def status(self) -> dict[str, Any]:
         c = self.controller

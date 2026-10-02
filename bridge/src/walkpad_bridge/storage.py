@@ -99,6 +99,22 @@ CREATE TABLE IF NOT EXISTS achievements (
     unlocked_at REAL NOT NULL
 );
 
+-- v9: open-world quests taken from NPCs. The web app makes up a quest (who, where, what); the
+-- bridge keeps it and pays its XP once it is done (capped in progression.py).
+CREATE TABLE IF NOT EXISTS quests (
+    world_id    INTEGER NOT NULL,
+    id          TEXT NOT NULL,             -- "<giver npc id>:<n>": the giver's n-th quest
+    title       TEXT NOT NULL,
+    kind        TEXT NOT NULL,             -- deliver | visit | explore
+    data        TEXT NOT NULL,             -- JSON: target, place names, distances
+    xp          INTEGER NOT NULL,
+    state       TEXT NOT NULL,             -- active | done | failed | abandoned
+    progress    REAL NOT NULL DEFAULT 0,
+    accepted_at REAL NOT NULL,
+    finished_at REAL,
+    PRIMARY KEY (world_id, id)
+);
+
 -- v4: granted Google 3D tiles sessions, for the cost guard (tiles3d.py).
 CREATE TABLE IF NOT EXISTS tiles3d_sessions (
     id         INTEGER PRIMARY KEY,
@@ -109,9 +125,9 @@ CREATE TABLE IF NOT EXISTS tiles3d_sessions (
 );
 CREATE INDEX IF NOT EXISTS tiles3d_sessions_month ON tiles3d_sessions (month, day);
 """
-# v1 -> v4, v7 and v8 only add tables, which CREATE ... IF NOT EXISTS does on open; v5 and v6
+# v1 -> v4 and v7 -> v9 only add tables, which CREATE ... IF NOT EXISTS does on open; v5 and v6
 # add columns (MIGRATIONS below).
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 # (version, column, ALTER statement): applied when an older database lacks the column.
 MIGRATIONS = [
     (5, ("routes", "seed"), "ALTER TABLE routes ADD COLUMN seed INTEGER"),
@@ -458,6 +474,43 @@ class Store:
             rows = self.db.execute("SELECT * FROM discoveries WHERE world_id = ? ORDER BY found_at", (world_id,))
         return [dict(r) for r in rows]
 
+    def quests(self, world_id: int | None = None) -> list[dict[str, Any]]:
+        if world_id is None:
+            rows = self.db.execute("SELECT * FROM quests ORDER BY accepted_at")
+        else:
+            rows = self.db.execute("SELECT * FROM quests WHERE world_id = ? ORDER BY accepted_at", (world_id,))
+        return [_quest(r) for r in rows]
+
+    def get_quest(self, world_id: int, quest_id: str) -> dict[str, Any] | None:
+        row = self.db.execute("SELECT * FROM quests WHERE world_id = ? AND id = ?", (world_id, quest_id)).fetchone()
+        return None if row is None else _quest(row)
+
+    def add_quest(self, world_id: int, quest_id: str, title: str, kind: str, data: dict[str, Any], xp: int,
+                  now: float) -> dict[str, Any] | None:
+        """Take a quest; None if this quest was taken before (each is offered once)."""
+        cur = self.db.execute(
+            "INSERT OR IGNORE INTO quests (world_id, id, title, kind, data, xp, state, accepted_at)"
+            " VALUES (?, ?, ?, ?, ?, ?, 'active', ?)",
+            (world_id, quest_id, title, kind, json.dumps(data, separators=(",", ":")), xp, now),
+        )
+        return self.get_quest(world_id, quest_id) if cur.rowcount else None
+
+    def update_quest(self, world_id: int, quest_id: str, progress: float | None, state: str | None,
+                     now: float) -> dict[str, Any] | None:
+        """Progress on an active quest, or finish it. A finished quest no longer changes."""
+        with self.db:
+            self.db.execute("BEGIN")
+            quest = self.get_quest(world_id, quest_id)
+            if quest is None or quest["state"] != "active":
+                return quest
+            if progress is not None:
+                self.db.execute("UPDATE quests SET progress = MAX(progress, ?) WHERE world_id = ? AND id = ?",
+                                (progress, world_id, quest_id))
+            if state is not None and state != "active":
+                self.db.execute("UPDATE quests SET state = ?, finished_at = ? WHERE world_id = ? AND id = ?",
+                                (state, now, world_id, quest_id))
+        return self.get_quest(world_id, quest_id)
+
     def unlocked_achievements(self) -> dict[str, float]:
         return {r["id"]: r["unlocked_at"] for r in self.db.execute("SELECT * FROM achievements")}
 
@@ -481,6 +534,12 @@ def _world(row: sqlite3.Row) -> dict[str, Any]:
     world = dict(row)
     world["active"] = bool(world["active"])
     return world
+
+
+def _quest(row: sqlite3.Row) -> dict[str, Any]:
+    quest = dict(row)
+    quest["data"] = json.loads(quest["data"])
+    return quest
 
 
 def _route(row: sqlite3.Row) -> dict[str, Any]:

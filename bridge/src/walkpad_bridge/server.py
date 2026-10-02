@@ -20,6 +20,7 @@ page from another site cannot drive the belt through a LAN browser.
 from __future__ import annotations
 
 import asyncio
+import json
 import contextlib
 import logging
 import math
@@ -111,6 +112,19 @@ class Discovery(BaseModel):
 
 class Discoveries(BaseModel):
     items: list[Discovery] = Field(min_length=1, max_length=50)
+
+
+class QuestCreate(BaseModel):
+    id: str = Field(min_length=3, max_length=60, pattern=r"^[a-z0-9-]+:[0-9]{1,4}$")
+    title: str = Field(min_length=1, max_length=120)
+    kind: Literal["deliver", "visit", "explore"]
+    data: dict[str, Any] = Field(default_factory=dict)
+    xp: int = Field(ge=0, le=progression.QUEST_XP_MAX)
+
+
+class QuestUpdate(BaseModel):
+    progress: float | None = Field(default=None, ge=0, le=1e7, allow_inf_nan=False)
+    state: Literal["done", "failed", "abandoned"] | None = None
 
 
 class WorldRename(BaseModel):
@@ -491,6 +505,34 @@ def create_app(service: BridgeService, config: Config) -> FastAPI:
             items.append((d.kind, d.key, xp))
         new = service.store.add_discoveries(world_id, items, service.wall_clock())
         return {"new": new, "profile": service.game_profile()}
+
+    @app.get("/worlds/{world_id}/quests")
+    async def world_quests(world_id: int) -> dict[str, Any]:
+        return {"quests": service.store.quests(world_id)}
+
+    @app.post("/worlds/{world_id}/quests", status_code=201)
+    async def take_quest(world_id: int, body: QuestCreate, _client: str = client_dep) -> dict[str, Any]:
+        """Take a quest an NPC offered (each quest once; a few at a time)."""
+        if service.store.get_world(world_id) is None:
+            raise HTTPException(404, "no such world")
+        if len(json.dumps(body.data)) > 2000:
+            raise HTTPException(422, "quest data too large")
+        active = [q for q in service.store.quests(world_id) if q["state"] == "active"]
+        if len(active) >= progression.MAX_ACTIVE_QUESTS:
+            raise HTTPException(409, f"at most {progression.MAX_ACTIVE_QUESTS} quests at a time")
+        quest = service.store.add_quest(world_id, body.id, body.title.strip(), body.kind, body.data, body.xp,
+                                        service.wall_clock())
+        if quest is None:
+            raise HTTPException(409, "this quest was taken before")
+        return quest
+
+    @app.patch("/worlds/{world_id}/quests/{quest_id}")
+    async def update_quest(world_id: int, quest_id: str, body: QuestUpdate, _client: str = client_dep) -> dict[str, Any]:
+        """Progress on a quest, or its end (done pays its XP)."""
+        quest = service.store.update_quest(world_id, quest_id, body.progress, body.state, service.wall_clock())
+        if quest is None:
+            raise HTTPException(404, "no such quest")
+        return {"quest": quest, "profile": service.game_profile()}
 
     @app.delete("/worlds/{world_id}", status_code=204)
     async def delete_world(world_id: int, _client: str = client_dep) -> None:
